@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skyward · Flight Price Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo">✈</span> Skyward</div>
+  <nav><a href="#forecast">Forecast</a><a href="#deals">Deals</a><a href="#watches">Alerts</a><a href="/docs">API</a></nav>
+</header>
+
+<main>
+  <section class="hero">
+    <h1>Know when to book.</h1>
+    <p>Machine-learning fare forecasts that account for seasonality, holidays and days-to-departure, plus deal detection and price alerts.</p>
+  </section>
+
+  <section id="forecast" class="card">
+    <form id="search" class="row">
+      <label>Route<select id="route"></select></label>
+      <label>Departure<input type="date" id="depart" required></label>
+      <label>Price you see (optional)<input type="number" id="current" step="0.01" placeholder="e.g. 520"></label>
+      <button type="submit">Forecast</button>
+    </form>
+    <div id="advice" class="advice hidden">
+      <div class="verdict"><span id="action" class="pill"></span><p id="reason"></p></div>
+      <div class="stats">
+        <div><small>Current</small><b id="s-now"></b></div>
+        <div><small>Expected low</small><b id="s-low"></b></div>
+        <div><small>Best day to buy</small><b id="s-day"></b></div>
+        <div><small>Model error (MAE)</small><b id="s-mae"></b></div>
+      </div>
+      <canvas id="curve" height="110"></canvas>
+    </div>
+  </section>
+
+  <section class="grid2">
+    <div class="card"><h2>Price history</h2><canvas id="hist" height="160"></canvas></div>
+    <div class="card" id="deals"><h2>Deals & special offers</h2><ul id="deal-list" class="list"></ul></div>
+  </section>
+
+  <section id="watches" class="card">
+    <h2>Price alerts</h2>
+    <form id="watch" class="row">
+      <label>Target price<input type="number" id="w-target" step="0.01" placeholder="optional"></label>
+      <label>Email<input type="email" id="w-email" placeholder="you@example.com"></label>
+      <label>Telegram chat ID<input id="w-tg" placeholder="optional"></label>
+      <button type="submit">Watch this trip</button>
+      <button type="button" id="check" class="ghost">Run check now</button>
+    </form>
+    <ul id="watch-list" class="list"></ul>
+    <h3>Recent alerts</h3>
+    <ul id="alert-list" class="list"></ul>
+  </section>
+</main>
+<footer>Data shown is synthetic unless live API keys are configured. Not financial or travel advice.</footer>
+<script src="/static/app.js"></script>
+</body>
+</html>
