@@ -22,13 +22,13 @@ ROUTE_IDX = {r: i for i, r in enumerate(ROUTES)}
 def featurize(route: str, depart: pd.Series, observed: pd.Series) -> pd.DataFrame:
     depart = pd.to_datetime(depart)
     observed = pd.to_datetime(observed)
-    doy = depart.dt.dayofyear
+    doy = depart.dt.day_of_year
     return pd.DataFrame(
         {
             "route_idx": ROUTE_IDX.get(route, -1),
             "dtd": (depart - observed).dt.days.clip(lower=0),
             "month": depart.dt.month,
-            "dow": depart.dt.weekday,
+            "dow": depart.dt.day_of_week,
             "doy_sin": np.sin(2 * np.pi * doy / 365.25),
             "doy_cos": np.cos(2 * np.pi * doy / 365.25),
             "event": [event_factor(d.date())[0] for d in depart],
@@ -57,6 +57,17 @@ class FareForecaster:
         self.mae = float(np.mean(np.abs(pred - np.exp(y[idx[split:]]))))
         self.model.fit(X, y)
         return self
+
+    def predict_frame(self, df: pd.DataFrame) -> np.ndarray:
+        """Vectorised expected price for many (route, depart, observed) rows at once."""
+        if df.empty:
+            return np.array([])
+        df = df.reset_index(drop=True)
+        out = np.empty(len(df))
+        for route, g in df.groupby("route"):
+            X = featurize(route, g["depart"].reset_index(drop=True), g["observed"].reset_index(drop=True))
+            out[g.index.to_numpy()] = np.exp(self.model.predict(X))
+        return out
 
     def predict(self, route: str, depart: dt.date, observed: list[dt.date]) -> np.ndarray:
         X = featurize(route, pd.Series([depart] * len(observed)), pd.Series(observed))

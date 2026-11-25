@@ -1,0 +1,26 @@
+# Render Blueprint: Dashboard -> New -> Blueprint -> pick this repo.
+# The web service is stateless; all data lives in Postgres (DATABASE_URL, e.g. Neon free tier).
+# Scale up later by raising the plan / numInstances / WEB_CONCURRENCY - no code changes needed.
+services:
+  - type: web
+    name: skyward
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r ../requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers ${WEB_CONCURRENCY:-2} --proxy-headers --forwarded-allow-ips="*"
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+      - key: WEB_CONCURRENCY
+        value: "2"
+      - key: DATABASE_URL
+        sync: false   # paste your Neon connection string in the Render dashboard
+      - key: ADMIN_TOKEN
+        generateValue: true
+      - key: TRAVELPAYOUTS_TOKEN
+        sync: false
+      - key: TRAVELPAYOUTS_MARKER
+        sync: false

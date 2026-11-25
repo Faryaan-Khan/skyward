@@ -1,45 +1,99 @@
-"""Skyward API: fare history, ML forecasts, deals and price alerts."""
+"""Skyward API: live fares, ML forecasts, deals and price alerts.
+
+Scaling design
+* Stateless web workers: all state lives in the shared database (Postgres in production),
+  so you can run as many workers/instances as traffic needs.
+* Heavy work (fetching prices, training) runs in a separate job (`app.ingest`). The trained
+  model is stored in the database; each worker reloads it when a newer one appears.
+* Read endpoints are cached in memory for a short time and responses are gzip-compressed.
+"""
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
+import hmac
+import logging
 import os
+import secrets
+import time
 from contextlib import asynccontextmanager
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from sqlalchemy import and_, delete, func, insert, select
 
-from . import db, notify
+from . import db, ingest
 from .model import FareForecaster
 from .synthetic import EVENTS, ROUTES
 
-STATE: dict = {}
+log = logging.getLogger("skyward")
+STATE: dict = {"model": None, "model_id": None, "model_created": None}
 FRONTEND = os.path.join(os.path.dirname(__file__), "..", "..", "frontend")
+MODEL_POLL_SECONDS = int(os.getenv("MODEL_POLL_SECONDS", "120"))
+CACHE_SECONDS = int(os.getenv("CACHE_SECONDS", "60"))
+_cache: dict[str, tuple[float, object]] = {}
 
 
-def load_history() -> pd.DataFrame:
-    with db.connect() as c:
-        return pd.read_sql_query("SELECT route, observed, depart, price, is_sale FROM fares", c)
+def cached(key: str, fn):
+    hit = _cache.get(key)
+    if hit and time.monotonic() - hit[0] < CACHE_SECONDS:
+        return hit[1]
+    val = fn()
+    _cache[key] = (time.monotonic(), val)
+    return val
+
+
+def _load_latest_model() -> bool:
+    """Load the newest stored model; train one if the database has none. Returns True if changed."""
+    newest = db.latest_model_id()
+    if newest is None:
+        ingest.retrain()
+        newest = db.latest_model_id()
+    if newest == STATE["model_id"]:
+        return False
+    mid, created, model = db.load_model()
+    STATE.update(model=model, model_id=mid, model_created=created)
+    _cache.clear()
+    return True
+
+
+async def _model_watcher():
+    while True:
+        await asyncio.sleep(MODEL_POLL_SECONDS)
+        try:
+            if await asyncio.to_thread(_load_latest_model):
+                log.info("loaded newer model %s", STATE["model_id"])
+        except Exception as e:  # keep serving with the current model
+            log.warning("model reload failed: %s", e)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     db.init()
-    STATE["model"] = FareForecaster().fit(load_history())
+    _load_latest_model()
+    task = asyncio.create_task(_model_watcher())
     yield
+    task.cancel()
 
 
-app = FastAPI(title="Skyward", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Skyward", version="0.2.0", lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+
+def model() -> FareForecaster:
+    return STATE["model"]
 
 
 class WatchIn(BaseModel):
     route: str
     depart: dt.date
-    target_price: float | None = None
-    email: str | None = None
-    telegram_chat_id: str | None = None
+    target_price: float | None = Field(default=None, gt=0)
+    email: str | None = Field(default=None, max_length=255)
+    telegram_chat_id: str | None = Field(default=None, max_length=64)
 
 
 def _check_route(route: str) -> None:
@@ -47,9 +101,33 @@ def _check_route(route: str) -> None:
         raise HTTPException(404, f"Unknown route {route}. Try one of {list(ROUTES)}")
 
 
+def _require_admin(token: str | None) -> None:
+    expected = os.getenv("ADMIN_TOKEN")
+    if not expected or not token or not hmac.compare_digest(token, expected):
+        raise HTTPException(403, "Admin token required")
+
+
 @app.get("/api/health")
 def health():
-    return {"ok": True, "model_mae": STATE["model"].mae}
+    return {"ok": True, "model_mae": model().mae, "model_id": STATE["model_id"]}
+
+
+@app.get("/api/status")
+def status():
+    """When prices were last refreshed and where the data comes from."""
+    def build():
+        with db.connect() as c:
+            last = c.execute(select(func.max(db.fares.c.fetched_at)).where(db.fares.c.source != "synthetic")).scalar()
+            by_source = dict(c.execute(
+                select(db.fares.c.source, func.count()).group_by(db.fares.c.source)).all())
+        return {
+            "live": bool(last),
+            "last_updated": last.isoformat() if last else None,
+            "rows_by_source": by_source,
+            "model_trained_at": STATE["model_created"].isoformat() if STATE["model_created"] else None,
+            "model_mae": model().mae,
+        }
+    return cached("status", build)
 
 
 @app.get("/api/routes")
@@ -63,15 +141,69 @@ def events():
 
 
 @app.get("/api/history/{route}")
-def history(route: str):
+def history(route: str, response: Response):
     _check_route(route)
-    with db.connect() as c:
-        rows = c.execute(
-            "SELECT observed, ROUND(MIN(price),2) low, ROUND(AVG(price),2) avg FROM fares WHERE route=? "
-            "GROUP BY strftime('%Y-%W', observed) ORDER BY observed",
-            (route,),
-        ).fetchall()
-    return [dict(r) for r in rows]
+    response.headers["Cache-Control"] = f"public, max-age={CACHE_SECONDS}"
+
+    def build():
+        with db.connect() as c:
+            daily = pd.DataFrame(db.rows(c.execute(
+                select(db.fares.c.observed, func.min(db.fares.c.price).label("low"),
+                       func.avg(db.fares.c.price).label("avg"), func.count().label("n"))
+                .where(db.fares.c.route == route).group_by(db.fares.c.observed).order_by(db.fares.c.observed)
+            )))
+        if daily.empty:
+            return []
+        daily["observed"] = pd.to_datetime(daily["observed"])
+        daily["w"] = daily["avg"] * daily["n"]
+        wk = daily.set_index("observed").resample("W-MON", label="left", closed="left").agg(
+            {"low": "min", "w": "sum", "n": "sum"}).dropna()
+        wk = wk[wk["n"] > 0]
+        return [{"observed": d.date().isoformat(), "low": round(r.low, 2), "avg": round(r.w / r.n, 2)}
+                for d, r in wk.iterrows()]
+    return cached(f"history:{route}", build)
+
+
+@app.get("/api/live/{route}")
+def live(route: str, response: Response, limit: int = 60):
+    """Latest real fares per departure date, with change vs the previous day's snapshot."""
+    _check_route(route)
+    response.headers["Cache-Control"] = f"public, max-age={CACHE_SECONDS}"
+
+    def build():
+        f = db.fares.c
+        with db.connect() as c:
+            days = [r[0] for r in c.execute(
+                select(f.observed).where(and_(f.route == route, f.source != "synthetic"))
+                .group_by(f.observed).order_by(f.observed.desc()).limit(2))]
+            if not days:
+                return {"route": route, "live": False, "fares": []}
+            latest = db.rows(c.execute(
+                select(f.depart, f.price, f.carrier, f.flight_number, f.transfers, f.link, f.fetched_at)
+                .where(and_(f.route == route, f.source != "synthetic", f.observed == days[0],
+                            f.depart > dt.date.today()))
+                .order_by(f.depart).limit(limit)))
+            prev = {}
+            if len(days) > 1:
+                prev = {r["depart"]: r["price"] for r in db.rows(c.execute(
+                    select(f.depart, f.price).where(and_(f.route == route, f.source != "synthetic",
+                                                         f.observed == days[1]))))}
+        if latest:
+            exp = model().predict_frame(pd.DataFrame(
+                {"route": route, "depart": [r["depart"] for r in latest], "observed": dt.date.today()}))
+        out = []
+        for r, e in zip(latest, exp if latest else []):
+            before = prev.get(r["depart"])
+            out.append({
+                "depart": r["depart"].isoformat(), "price": round(r["price"], 2), "carrier": r["carrier"],
+                "flight_number": r["flight_number"], "transfers": r["transfers"], "link": r["link"],
+                "change": round(r["price"] - before, 2) if before is not None else None,
+                "expected": round(float(e), 2),
+            })
+        fetched = max((r["fetched_at"] for r in latest if r["fetched_at"]), default=None)
+        return {"route": route, "live": True, "observed": days[0].isoformat(),
+                "fetched_at": fetched.isoformat() if fetched else None, "fares": out}
+    return cached(f"live:{route}:{limit}", build)
 
 
 @app.get("/api/forecast/{route}")
@@ -79,77 +211,108 @@ def forecast(route: str, depart: dt.date, current_price: float | None = None):
     _check_route(route)
     if depart <= dt.date.today():
         raise HTTPException(400, "Departure must be in the future")
-    return STATE["model"].advise(route, depart, current_price)
+    if depart > dt.date.today() + dt.timedelta(days=365):
+        raise HTTPException(400, "Departure must be within the next 12 months")
+    if current_price is None:
+        with db.connect() as c:
+            current_price = ingest.latest_live_price(c, route, depart)
+    return model().advise(route, depart, current_price)
 
 
 @app.get("/api/deals")
-def deals(limit: int = 12):
-    """Recent fares well below the model's expected price, plus flagged flash sales."""
-    since = (dt.date.today() - dt.timedelta(days=21)).isoformat()
-    with db.connect() as c:
-        rows = [dict(r) for r in c.execute(
-            "SELECT route, observed, depart, price, is_sale FROM fares WHERE observed>=? AND depart>?",
-            (since, dt.date.today().isoformat()),
-        )]
-    out = []
-    m = STATE["model"]
-    for r in rows:
-        exp = float(m.predict(r["route"], dt.date.fromisoformat(r["depart"]), [dt.date.fromisoformat(r["observed"])])[0])
-        disc = 1 - r["price"] / exp
-        if disc > 0.15:
-            out.append({**r, "expected": round(exp, 2), "discount_pct": round(disc * 100, 1), "is_sale": bool(r["is_sale"])})
-    out.sort(key=lambda x: -x["discount_pct"])
-    return out[:limit]
+def deals(response: Response, limit: int = 12):
+    """Recent fares well below the model's expected price, plus flagged flash sales. Real fares first."""
+    response.headers["Cache-Control"] = f"public, max-age={CACHE_SECONDS}"
+    limit = max(1, min(limit, 50))
+
+    def build():
+        today = dt.date.today()
+        f = db.fares.c
+        with db.connect() as c:
+            has_live = c.execute(select(func.count()).where(and_(
+                f.source != "synthetic", f.observed >= today - dt.timedelta(days=3)))).scalar() > 0
+            cond = [f.depart > today]
+            cond += ([f.source != "synthetic", f.observed >= today - dt.timedelta(days=3)] if has_live
+                     else [f.observed >= today - dt.timedelta(days=21)])
+            df = pd.DataFrame(db.rows(c.execute(
+                select(f.route, f.observed, f.depart, f.price, f.is_sale, f.source, f.carrier, f.link)
+                .where(and_(*cond)))))
+        if df.empty:
+            return []
+        df["expected"] = model().predict_frame(df)
+        df["discount_pct"] = (1 - df["price"] / df["expected"]) * 100
+        df = df[df["discount_pct"] > 15].sort_values("discount_pct", ascending=False)
+        df = df.drop_duplicates(["route", "depart"]).head(limit)
+        return [{
+            "route": r.route, "observed": r.observed.isoformat(), "depart": r.depart.isoformat(),
+            "price": round(r.price, 2), "expected": round(r.expected, 2), "discount_pct": round(r.discount_pct, 1),
+            "is_sale": bool(r.is_sale), "source": r.source, "carrier": r.carrier, "link": r.link,
+        } for r in df.itertuples()]
+    return cached(f"deals:{limit}", build)
 
 
-@app.get("/api/watches")
-def list_watches():
-    with db.connect() as c:
-        return [dict(r) for r in c.execute("SELECT * FROM watches ORDER BY id DESC")]
+# ---- Price watches: private to whoever created them (manage token) ----
+
+def _public_watch(w: dict) -> dict:
+    return {"id": w["id"], "route": w["route"], "depart": w["depart"].isoformat(),
+            "target_price": w["target_price"], "has_email": bool(w["email"]),
+            "has_telegram": bool(w["telegram_chat_id"])}
 
 
 @app.post("/api/watches", status_code=201)
 def create_watch(w: WatchIn):
     _check_route(w.route)
+    if w.depart <= dt.date.today():
+        raise HTTPException(400, "Departure must be in the future")
+    token = secrets.token_urlsafe(24)
     with db.connect() as c:
-        cur = c.execute(
-            "INSERT INTO watches(route, depart, target_price, email, telegram_chat_id) VALUES (?,?,?,?,?)",
-            (w.route, w.depart.isoformat(), w.target_price, w.email, w.telegram_chat_id),
-        )
-        return {"id": cur.lastrowid, **w.model_dump(mode="json")}
+        wid = c.execute(insert(db.watches).values(
+            token=token, route=w.route, depart=w.depart, target_price=w.target_price,
+            email=w.email, telegram_chat_id=w.telegram_chat_id).returning(db.watches.c.id)).scalar()
+    return {"id": wid, "token": token, **w.model_dump(mode="json")}
 
 
-@app.delete("/api/watches/{watch_id}", status_code=204)
-def delete_watch(watch_id: int):
+@app.get("/api/watches")
+def list_watches(tokens: str = ""):
+    """Watches for the given comma-separated manage tokens (the browser keeps them)."""
+    toks = [t for t in tokens.split(",") if t][:50]
+    if not toks:
+        return []
     with db.connect() as c:
-        c.execute("DELETE FROM watches WHERE id=?", (watch_id,))
+        ws = db.rows(c.execute(select(db.watches).where(db.watches.c.token.in_(toks)).order_by(db.watches.c.id.desc())))
+        ids = [w["id"] for w in ws]
+        al = db.rows(c.execute(select(db.alerts).where(db.alerts.c.watch_id.in_(ids))
+                               .order_by(db.alerts.c.id.desc()).limit(50))) if ids else []
+    return {"watches": [_public_watch(w) for w in ws],
+            "alerts": [{"watch_id": a["watch_id"], "kind": a["kind"], "message": a["message"],
+                        "created": a["created"].isoformat() if a["created"] else None} for a in al]}
+
+
+@app.delete("/api/watches/{token}", status_code=204)
+def delete_watch(token: str):
+    with db.connect() as c:
+        c.execute(delete(db.watches).where(db.watches.c.token == token))
 
 
 @app.post("/api/watches/check")
-def check_watches():
-    """Evaluate every watch and fire alerts. Run on a schedule (cron / GitHub Actions)."""
-    fired = []
-    with db.connect() as c:
-        for w in [dict(r) for r in c.execute("SELECT * FROM watches")]:
-            depart = dt.date.fromisoformat(w["depart"])
-            if depart <= dt.date.today():
-                continue
-            adv = STATE["model"].advise(w["route"], depart)
-            hit_target = w["target_price"] and adv["current_price"] <= w["target_price"]
-            if adv["action"] == "BUY" or hit_target:
-                kind = "target" if hit_target else "buy_now"
-                msg = (f"{w['route']} on {w['depart']}: {adv['current_price']:.0f} now. "
-                       f"Expected low {adv['expected_low']:.0f}. {adv['reason']}")
-                notify.dispatch(w, f"Skyward: time to book {w['route']}", msg)
-                c.execute("INSERT INTO alerts(watch_id, kind, message) VALUES (?,?,?)", (w["id"], kind, msg))
-                fired.append({"watch_id": w["id"], "kind": kind, "message": msg})
-    return fired
+def check_watches(x_admin_token: str | None = Header(default=None)):
+    """Evaluate every watch and fire alerts. Normally run by the ingestion job; admin only."""
+    _require_admin(x_admin_token)
+    return ingest.check_watches(model())
 
 
-@app.get("/api/alerts")
-def alerts():
-    with db.connect() as c:
-        return [dict(r) for r in c.execute("SELECT * FROM alerts ORDER BY id DESC LIMIT 50")]
+@app.post("/api/admin/reload-model")
+def reload_model(x_admin_token: str | None = Header(default=None)):
+    _require_admin(x_admin_token)
+    return {"changed": _load_latest_model(), "model_id": STATE["model_id"]}
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    resp = await call_next(request)
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    return resp
 
 
 if os.path.isdir(FRONTEND):

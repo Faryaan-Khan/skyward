@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Skyward · Flight Price Intelligence</title>
+<meta name="description" content="Live flight prices, ML fare forecasts, deal detection and price alerts.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -12,20 +13,21 @@
 <body>
 <header class="top">
   <div class="brand"><span class="logo">✈</span> Skyward</div>
-  <nav><a href="#forecast">Forecast</a><a href="#deals">Deals</a><a href="#watches">Alerts</a><a href="/docs">API</a></nav>
+  <nav><a href="#live">Live fares</a><a href="#forecast">Forecast</a><a href="#deals">Deals</a><a href="#watches">Alerts</a><a href="/docs">API</a></nav>
 </header>
 
 <main>
   <section class="hero">
     <h1>Know when to book.</h1>
-    <p>Machine-learning fare forecasts that account for seasonality, holidays and days-to-departure, plus deal detection and price alerts.</p>
+    <p>Live fares refreshed throughout the day, machine-learning forecasts that account for seasonality, holidays and days-to-departure, plus deal detection and price alerts.</p>
+    <div id="status" class="status"><span class="dot"></span><span id="status-text">Checking data…</span></div>
   </section>
 
   <section id="forecast" class="card">
     <form id="search" class="row">
       <label>Route<select id="route"></select></label>
       <label>Departure<input type="date" id="depart" required></label>
-      <label>Price you see (optional)<input type="number" id="current" step="0.01" placeholder="e.g. 520"></label>
+      <label>Price you see (optional)<input type="number" id="current" step="0.01" min="0" placeholder="uses latest live fare"></label>
       <button type="submit">Forecast</button>
     </form>
     <div id="advice" class="advice hidden">
@@ -40,6 +42,16 @@
     </div>
   </section>
 
+  <section id="live" class="card">
+    <div class="head"><h2>Live fares <span id="live-route" class="muted"></span></h2><small id="live-updated" class="muted"></small></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Departure</th><th>Price</th><th>vs yesterday</th><th>vs model</th><th>Airline</th><th>Stops</th><th></th></tr></thead>
+        <tbody id="live-body"><tr><td colspan="7">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
   <section class="grid2">
     <div class="card"><h2>Price history</h2><canvas id="hist" height="160"></canvas></div>
     <div class="card" id="deals"><h2>Deals & special offers</h2><ul id="deal-list" class="list"></ul></div>
@@ -47,19 +59,19 @@
 
   <section id="watches" class="card">
     <h2>Price alerts</h2>
+    <p class="muted small">Alerts for the route and date selected above. Your watches are private to this browser.</p>
     <form id="watch" class="row">
-      <label>Target price<input type="number" id="w-target" step="0.01" placeholder="optional"></label>
+      <label>Target price<input type="number" id="w-target" step="0.01" min="0" placeholder="optional"></label>
       <label>Email<input type="email" id="w-email" placeholder="you@example.com"></label>
       <label>Telegram chat ID<input id="w-tg" placeholder="optional"></label>
       <button type="submit">Watch this trip</button>
-      <button type="button" id="check" class="ghost">Run check now</button>
     </form>
     <ul id="watch-list" class="list"></ul>
     <h3>Recent alerts</h3>
     <ul id="alert-list" class="list"></ul>
   </section>
 </main>
-<footer>Data shown is synthetic unless live API keys are configured. Not financial or travel advice.</footer>
+<footer>Live fares: Aviasales data via the Travelpayouts Data API (cached from recent searches, prices in USD). Synthetic history is used where live data is missing and is labelled. Not financial or travel advice.</footer>
 <script src="/static/app.js"></script>
 </body>
 </html>
