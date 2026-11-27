@@ -62,6 +62,13 @@ def fetch_route_month(route: str, month: str, today: dt.date | None = None, clie
     today = today or dt.date.today()
     origin, dest = route.split("-")
     found = (fetcher or travelpayouts.fetch_month)(origin, dest, month, client=client)
+    seen, unique = set(), []
+    for q in found:  # the two requests can return the same ticket
+        key = (q["depart"], q.get("carrier"), q.get("flight_number"), q["price"])
+        if key not in seen:
+            seen.add(key)
+            unique.append(q)
+    found = unique
     quotes: dict[dt.date, dict] = {}            # cheapest per date (history + model)
     per_airline: dict[tuple, dict] = {}         # cheapest per (date, airline) (comparison)
     for q in found:
