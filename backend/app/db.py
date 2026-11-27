@@ -217,6 +217,12 @@ def try_acquire(name: str, min_interval_s: int) -> bool:
         return res.rowcount == 1
 
 
+def release(name: str) -> None:
+    """Let a job run again at the next opportunity (e.g. after a failed attempt)."""
+    with connect() as c:
+        c.execute(update(job_lock).where(job_lock.c.name == name).values(started=None))
+
+
 def last_job_start(name: str) -> dt.datetime | None:
     with connect() as c:
         return c.execute(select(job_lock.c.started).where(job_lock.c.name == name)).scalar()

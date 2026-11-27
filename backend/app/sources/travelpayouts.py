@@ -41,7 +41,11 @@ def popular_directions(origin: str, client: httpx.Client | None = None) -> list[
     finally:
         if own:
             client.close()
-    return [code for code in data if isinstance(code, str) and len(code) == 3 and code != origin]
+    if isinstance(data, dict):        # documented shape: {"BKK": {...}, "SIN": {...}} in popularity order
+        codes = list(data.keys())
+    else:                             # tolerate a list of {"destination": "BKK", ...}
+        codes = [d.get("destination") for d in data if isinstance(d, dict)]
+    return [c for c in codes if isinstance(c, str) and len(c) == 3 and c.isalpha() and c != origin]
 
 
 def airports(client: httpx.Client | None = None) -> list[dict]:

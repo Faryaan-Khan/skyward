@@ -38,6 +38,11 @@ from .sources import travelpayouts
 from .synthetic import EVENTS
 
 log = logging.getLogger("skyward")
+logging.getLogger("skyward").setLevel(logging.INFO)          # our own messages show in Render's logs
+if not logging.getLogger("skyward").handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+    logging.getLogger("skyward").addHandler(_h)
 STATE: dict = {"model": None, "model_id": None, "model_created": None}
 FRONTEND = os.path.join(os.path.dirname(__file__), "..", "..", "frontend")
 MODEL_POLL_SECONDS = int(os.getenv("MODEL_POLL_SECONDS", "120"))
@@ -270,12 +275,15 @@ def status():
             last = c.execute(select(func.max(f.fetched_at)).where(f.source != "synthetic")).scalar()
             by_source = dict(c.execute(select(f.source, func.count()).group_by(f.source)).all())
             live_routes = c.execute(select(func.count(func.distinct(f.route))).where(f.source != "synthetic")).scalar()
+            pop_updated = c.execute(select(func.max(db.popular.c.updated))).scalar()
+            pop_count = c.execute(select(func.count()).select_from(db.popular)).scalar()
         return {
             "version": __version__,
             "live": bool(last),
             "last_updated": _iso(last),
             "rows_by_source": by_source,
             "routes_live": live_routes,
+            "popular_routes": pop_count, "popular_updated": _iso(pop_updated),
             "model_trained_at": _iso(STATE["model_created"]),
             "model_mae": model().mae,
             "model_mape": getattr(model(), "mape", None),

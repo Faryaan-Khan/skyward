@@ -172,6 +172,7 @@ def compute_popular(directions=None) -> list[dict]:
                 continue
             for i, dest in enumerate(dests):
                 worldwide[f"{hub}-{dest}"] = 8 - i
+    log.info("popular: %d worldwide routes, %d routes searched on Skyward this week", len(worldwide), len(users))
     scores = {code: 2 * users.get(code, 0) + worldwide.get(code, 0) for code in set(users) | set(worldwide)}
     top = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))[:POPULAR_SIZE]
     rows = [{"code": code, "rank": i + 1, "score": float(s), "user_searches": int(users.get(code, 0)),
@@ -401,9 +402,13 @@ def run_refresh(train: bool = True) -> dict:
         log.warning("route meta lookup failed: %s", e)
     if travelpayouts.enabled() and db.try_acquire("popular", 7 * 86400 - 3600):  # weekly
         try:
-            compute_popular()
+            rows = compute_popular()
+            if not any(r["worldwide"] for r in rows):
+                log.warning("popular routes: no worldwide data this time, will retry next refresh")
+                db.release("popular")
         except Exception as e:
             log.warning("popular routes update failed: %s", e)
+            db.release("popular")
     if travelpayouts.enabled():
         saved = fetch_live()
         out["fetched"] = sum(saved.values())
