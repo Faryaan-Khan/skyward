@@ -15,7 +15,11 @@
 
 [**Open the live site →**](https://skyward-tv5y.onrender.com) &nbsp;·&nbsp; [API docs](https://skyward-tv5y.onrender.com/docs)
 
-<img src="docs/screenshot.png" alt="Skyward dashboard: buy/wait forecast, live fares table, price history and deals" width="820">
+<img src="docs/screenshot.png" alt="Skyward dashboard at night: flight search, great-circle route on a globe, predicted price drops" width="820">
+
+<details><summary>Day mode</summary>
+<img src="docs/screenshot-light.png" alt="Skyward dashboard in day mode" width="820">
+</details>
 
 </div>
 

@@ -135,6 +135,8 @@ async def lifespan(_: FastAPI):
     ingest.seed_featured_routes()
     _load_latest_model()
     tasks = [asyncio.create_task(_model_watcher())]
+    if travelpayouts.enabled():  # look up city names/coordinates for routes that lack them
+        tasks.append(asyncio.create_task(asyncio.to_thread(ingest.fill_route_meta)))
     if AUTO_REFRESH:
         tasks.append(asyncio.create_task(_auto_refresh()))
     yield
