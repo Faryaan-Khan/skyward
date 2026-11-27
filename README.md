@@ -54,6 +54,10 @@ to **drop**. Set a watch and Skyward notifies you by email or Telegram when it's
 - **Interactive 3D earth**: NASA imagery (city lights at night), drag to spin, zoom, and tap any of
   ~3,700 airports to fly from or to it.
 - **Popular this week**: recomputed weekly from Skyward searches plus worldwide demand from 15 hubs.
+- **Compare airlines**: every airline found on the route (cheapest and direct flights), each with its exact
+  fare and the airline's own website; 180+ airlines in the directory.
+- **Fast live prices**: active routes refresh about every 2 minutes; the page re-checks every minute.
+- **How it works**: a simple animated guide at [`/how`](https://skyward-tv5y.onrender.com/how).
 - **Any currency**: prices shown in 160+ currencies with daily exchange rates; your choice is remembered.
 - **Predicted price drops**: the model scans live fares and highlights the ones it expects to get
   cheaper, by how much, and the best day to buy.
