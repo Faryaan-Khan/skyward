@@ -221,7 +221,7 @@ async function initGlobe() {
     .pointsMerge(true).pointAltitude(0.003).pointRadius(0.11).pointLat("lat").pointLng("lon")
     .arcColor((a) => (a.trail ? "rgba(230,205,148,.35)" : ["rgba(230,205,148,.2)", "#f0d9a4", "rgba(230,205,148,.2)"]))
     .arcStroke((a) => (a.trail ? 0.35 : 0.8)).arcDashLength((a) => (a.trail ? 1 : 0.35)).arcDashGap((a) => (a.trail ? 0 : 0.25))
-    .arcDashAnimateTime((a) => (a.trail ? 0 : 2400)).arcAltitudeAutoScale(0.45)
+    .arcDashAnimateTime((a) => (a.trail ? 0 : 2400)).arcAltitudeAutoScale(0.6)
     .ringColor(() => (t) => `rgba(230,205,148,${1 - t})`).ringMaxRadius(3.2).ringPropagationSpeed(2).ringRepeatPeriod(1400)
     .labelLat("lat").labelLng("lon").labelText("code").labelSize(0.9).labelDotRadius(0.35)
     .labelColor(() => "#f4e3bd").labelResolution(2).labelAltitude(0.01)

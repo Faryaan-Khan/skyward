@@ -584,7 +584,11 @@ def drops(response: Response, limit: int = 12):
         df["best_day"] = [o[1] for o in outlook]
         mae = model().mae or 0
         df = df[(df["drop"] >= 0.05) & (df["price"] * df["drop"] >= mae * 0.5)]
-        df = df.sort_values("drop", ascending=False).drop_duplicates("route").head(limit)
+        df = df.sort_values("drop", ascending=False).drop_duplicates("route")
+        # variety: one route per destination and at most two per origin, so one city can't fill the list
+        df["o"], df["d"] = df["route"].str[:3], df["route"].str[4:]
+        df = df.drop_duplicates("d")
+        df = df[df.groupby("o").cumcount() < 2].head(limit)
         meta = _route_meta(df["route"].tolist())
         return [{
             **_meta_out(r.route, meta.get(r.route)),
