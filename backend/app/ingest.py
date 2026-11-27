@@ -44,7 +44,9 @@ def _months(today: dt.date, n: int) -> list[str]:
 
 SEARCHED_MONTHS_AHEAD = 3        # routes added by users' searches
 MAX_SEARCHED_ROUTES = 40          # most-searched routes kept fresh by the refresh job
-SEARCH_CACHE_MINUTES = 15
+SEARCH_CACHE_MINUTES = 2          # a search re-fetches prices if they're older than this
+OFFERS_PER_DATE = 8               # airlines kept per date for the "compare airlines" view
+QUICK_MAX_ROUTES = 25             # routes in the fast (every ~2 min) refresh
 
 
 def _month_bounds(month: str) -> tuple[dt.date, dt.date]:
@@ -60,19 +62,28 @@ def fetch_route_month(route: str, month: str, today: dt.date | None = None, clie
     today = today or dt.date.today()
     origin, dest = route.split("-")
     found = (fetcher or travelpayouts.fetch_month)(origin, dest, month, client=client)
-    quotes: dict[dt.date, dict] = {}
+    quotes: dict[dt.date, dict] = {}            # cheapest per date (history + model)
+    per_airline: dict[tuple, dict] = {}         # cheapest per (date, airline) (comparison)
     for q in found:
         if q["depart"] <= today:
             continue
         best = quotes.get(q["depart"])
         if best is None or q["price"] < best["price"]:
             quotes[q["depart"]] = q
+        key = (q["depart"], q.get("carrier") or "?")
+        if key not in per_airline or q["price"] < per_airline[key]["price"]:
+            per_airline[key] = q
+    offers: list[dict] = []
+    for day in quotes:
+        day_offers = sorted((v for (d, _), v in per_airline.items() if d == day), key=lambda v: v["price"])
+        offers += day_offers[:OFFERS_PER_DATE]
     start, end = _month_bounds(month)
-    f = db.fares.c
+    f, o = db.fares.c, db.fare_offers.c
     now = dt.datetime.now(dt.timezone.utc)
     with db.connect() as c:
         c.execute(delete(db.fares).where(and_(
             f.route == route, f.observed == today, f.source == "travelpayouts", f.depart >= start, f.depart < end)))
+        c.execute(delete(db.fare_offers).where(and_(o.route == route, o.depart >= start, o.depart < end)))
         if quotes:
             c.execute(insert(db.fares), [
                 {"route": route, "observed": today, "depart": q["depart"], "price": q["price"], "is_sale": False,
@@ -80,7 +91,41 @@ def fetch_route_month(route: str, month: str, today: dt.date | None = None, clie
                  "transfers": q.get("transfers"), "link": q.get("link"), "fetched_at": now}
                 for q in quotes.values()
             ])
+            c.execute(insert(db.fare_offers), [
+                {"route": route, "depart": q["depart"], "carrier": q.get("carrier") or "?", "price": q["price"],
+                 "transfers": q.get("transfers"), "flight_number": q.get("flight_number"), "link": q.get("link"),
+                 "fetched_at": now}
+                for q in offers
+            ])
     return len(quotes)
+
+
+def quick_routes() -> list[str]:
+    """Routes for the fast refresh: featured, watched, and anything searched in the last 2 hours."""
+    cutoff = _utcnow() - dt.timedelta(hours=2)
+    out = list(ROUTES)
+    with db.connect() as c:
+        out += [r[0] for r in c.execute(select(db.search_events.c.route, func.count().label("n"))
+                                        .where(db.search_events.c.at >= cutoff).group_by(db.search_events.c.route)
+                                        .order_by(func.count().desc()).limit(QUICK_MAX_ROUTES))]
+        out += [r[0] for r in c.execute(select(db.watches.c.route).distinct())]
+    return list(dict.fromkeys(out))[:QUICK_MAX_ROUTES]
+
+
+def quick_refresh(today: dt.date | None = None, fetcher=None) -> int:
+    """Fast refresh (every ~2 minutes): current + next month for the most active routes. No retraining."""
+    if not travelpayouts.enabled() and fetcher is None:
+        return 0
+    today = today or dt.date.today()
+    n = 0
+    with httpx.Client(timeout=20) as client:
+        for route in quick_routes():
+            for month in _months(today, 2):
+                try:
+                    n += fetch_route_month(route, month, today, client=client, fetcher=fetcher)
+                except Exception as e:
+                    log.warning("quick fetch failed %s %s: %s", route, month, e)
+    return n
 
 
 def month_is_fresh(route: str, month: str, minutes: int = SEARCH_CACHE_MINUTES) -> bool:

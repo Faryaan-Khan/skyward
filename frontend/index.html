@@ -6,13 +6,13 @@
 <title>Skyward · Worldwide flight prices & forecasts</title>
 <meta name="description" content="Search flights worldwide, see live prices in your currency, compare booking sites, and let machine learning tell you when prices will drop.">
 <meta name="color-scheme" content="dark light">
-<script src="/static/theme.js?v=2.1.0b"></script>
+<script src="/static/theme.js?v=2.2.0"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js" integrity="sha256-dEAdc43T4D7l37O2hBIQ/ixOrYqWDEARykugt4qf2PM=" crossorigin="anonymous" defer></script>
-<link rel="stylesheet" href="/static/styles.css?v=2.1.0b">
+<link rel="stylesheet" href="/static/styles.css?v=2.2.0">
 </head>
 <body>
 <div class="app">
@@ -34,6 +34,7 @@
       <a href="#drops"><svg viewBox="0 0 24 24"><path d="M4 6l6 6 4-4 6 6M20 10v4h-4"/></svg>Predicted drops</a>
       <a href="#deals"><svg viewBox="0 0 24 24"><path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>Deals</a>
       <a href="#alerts"><svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 1 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0"/></svg>Price alerts</a>
+      <a href="/how" class="nav-page"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17h.01"/></svg>How it works</a>
     </nav>
     <div class="side-status">
       <div class="live-dot" id="live-dot"></div>
@@ -154,8 +155,22 @@
       </div>
     </section>
 
-    <!-- ===== Charts ===== -->
-    <section class="grid-2">
+    <!-- ===== Compare airlines ===== -->
+    <section class="card" id="airlines">
+      <div class="card-head">
+        <span class="eyebrow">Compare airlines</span>
+        <small class="muted" id="airline-count"></small>
+      </div>
+      <p class="muted small">Every airline we found on this route this month, cheapest first. The price opens that exact fare; the website link goes to the airline itself.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Airline</th><th>Cheapest</th><th>On</th><th>Stops</th><th>Available</th><th>Airline website</th></tr></thead>
+          <tbody id="airline-body"><tr><td colspan="6" class="empty">Search a route to compare airlines.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ===== Charts ===== -->    <section class="grid-2">
       <div class="card">
         <div class="card-head"><span class="eyebrow">Buy-or-wait forecast</span><span class="chip" id="fc-chip">–</span></div>
         <p class="muted small" id="fc-reason">Pick a date in the fares table to see how its price is expected to move.</p>
@@ -199,6 +214,7 @@
   </div>
 </div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
-<script src="/static/app.js?v=2.1.0b" defer></script>
+<script src="/static/airlines.js?v=2.2.0" defer></script>
+<script src="/static/app.js?v=2.2.0" defer></script>
 </body>
 </html>

@@ -220,6 +220,52 @@ def test_worldwide_search_any_route(monkeypatch):
         assert isinstance(c.get("/api/drops").json(), list)
 
 
+def multi_airline_fetch(origin, dest, month, client=None):
+    """Several airlines per date, so the comparison has something to compare."""
+    y, m = map(int, month.split("-"))
+    out = []
+    for day in (10, 20):
+        for carrier, price in (("MH", 300.0), ("AK", 180.0), ("MK", 420.0), ("AK", 199.0)):
+            out.append({"depart": dt.date(y, m, day), "price": price + day, "carrier": carrier,
+                        "flight_number": "1", "transfers": 0 if carrier == "MH" else 1,
+                        "link": f"https://www.aviasales.com/search/{carrier}"})
+    return out
+
+
+def test_compare_airlines_fast_refresh_and_background(monkeypatch):
+    monkeypatch.setattr(travelpayouts, "enabled", lambda: True)
+    monkeypatch.setattr(travelpayouts, "fetch_month", multi_airline_fetch)
+    nxt = (TODAY.replace(day=1) + dt.timedelta(days=32)).strftime("%Y-%m")
+    with TestClient(app) as c:
+        s = c.get(f"/api/search?origin=SIN&destination=MRU&month={nxt}").json()
+        day = s["fares"][0]
+        assert day["price"] == 190.0 and day["carrier"] == "AK"           # cheapest of all airlines
+        assert [o["carrier"] for o in day["offers"]] == ["AK", "MH", "MK"]  # one (cheapest) offer per airline
+        assert [a["carrier"] for a in s["airlines"]] == ["AK", "MH", "MK"]
+        assert s["airlines"][0]["dates"] == 2
+
+        # the page's own 1-minute refresh doesn't count as a search
+        from sqlalchemy import func, select
+        def events():
+            with db.connect() as conn:
+                return conn.execute(select(func.count()).select_from(db.search_events)
+                                    .where(db.search_events.c.route == "SIN-MRU")).scalar()
+        before = events()
+        c.get(f"/api/search?origin=SIN&destination=MRU&month={nxt}&background=1")
+        assert events() == before
+
+        # the fast refresh covers recently searched routes
+        assert "SIN-MRU" in ingest.quick_routes()
+        assert ingest.quick_refresh(fetcher=multi_airline_fetch) > 0
+
+
+def test_how_it_works_page():
+    with TestClient(app) as c:
+        r = c.get("/how")
+        assert r.status_code == 200 and "How it works" in r.text
+        assert "script-src 'self'" in r.headers["content-security-policy"]
+
+
 def test_places_and_rates(monkeypatch):
     monkeypatch.setattr(rates, "_cache", {"at": 0.0, "data": None})
     with TestClient(app) as c:

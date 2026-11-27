@@ -99,6 +99,20 @@ routes = Table(
     Column("featured", Boolean, nullable=False, default=False),
 )
 
+fare_offers = Table(  # latest snapshot only: cheapest offer per (route, date, airline), for airline comparison
+    "fare_offers", metadata,
+    Column("id", Integer, primary_key=True),
+    Column("route", String(16), nullable=False),
+    Column("depart", Date, nullable=False),
+    Column("carrier", String(8), nullable=False),
+    Column("price", Float, nullable=False),
+    Column("transfers", Integer),
+    Column("flight_number", String(16)),
+    Column("link", String(512)),
+    Column("fetched_at", DateTime(timezone=True)),
+    Index("ix_offers_route_depart", "route", "depart"),
+)
+
 search_events = Table(  # one row per search, for weekly popularity (pruned after 30 days)
     "search_events", metadata,
     Column("id", Integer, primary_key=True),

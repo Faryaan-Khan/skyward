@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How Skyward works · Simple guide</title>
+<meta name="description" content="How Skyward finds real flight prices, predicts when they'll drop, and lets you book on the site you trust.">
+<meta name="color-scheme" content="dark light">
+<script src="/static/theme.js?v=2.2.0"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/styles.css?v=2.2.0">
+</head>
+<body class="how">
+<header class="how-top">
+  <a class="brand inline" href="/" aria-label="Skyward home">
+    <svg class="wings" viewBox="0 0 64 24" aria-hidden="true">
+      <path d="M32 14c-4-6-14-9-30-9 7 2 12 4 15 7-5-1-9-1-13 0 6 1 11 3 15 6-3 0-6 1-8 2 6 0 12-1 21-6z"/>
+      <path d="M32 14c4-6 14-9 30-9-7 2-12 4-15 7 5-1 9-1 13 0-6 1-11 3-15 6 3 0 6 1 8 2-6 0-12-1-21-6z"/>
+    </svg>
+    <span class="wordmark">SKYWARD</span>
+  </a>
+  <nav class="how-nav">
+    <a href="/">← Back to dashboard</a>
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch colour mode">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <mask id="moon-mask"><rect x="0" y="0" width="24" height="24" fill="white"/><circle class="moon-bite" cx="24" cy="4" r="8" fill="black"/></mask>
+        <circle class="sun-core" cx="12" cy="12" r="5" mask="url(#moon-mask)"/>
+        <g class="sun-rays">
+          <line x1="12" y1="1.5" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22.5"/>
+          <line x1="1.5" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="22.5" y2="12"/>
+          <line x1="4.6" y1="4.6" x2="6.3" y2="6.3"/><line x1="17.7" y1="17.7" x2="19.4" y2="19.4"/>
+          <line x1="4.6" y1="19.4" x2="6.3" y2="17.7"/><line x1="17.7" y1="6.3" x2="19.4" y2="4.6"/>
+        </g>
+      </svg>
+    </button>
+  </nav>
+</header>
+
+<main class="how-main">
+  <!-- hero -->
+  <section class="how-hero">
+    <p class="eyebrow">How it works</p>
+    <h1>Find the flight. Know when to book.<br><em>Book where you trust.</em></h1>
+    <p class="lead">Skyward watches real flight prices around the world, uses machine learning to tell you if they're likely to
+      drop, and sends you straight to the airline or booking site to buy. It never sells tickets or takes your payment.</p>
+    <svg class="hero-flight" viewBox="0 0 600 160" aria-hidden="true">
+      <path id="hero-path" class="dash-path" d="M40 130 C 180 10, 420 10, 560 130"/>
+      <circle cx="40" cy="130" r="6" class="dot"/><circle cx="560" cy="130" r="6" class="dot"/>
+      <text x="40" y="155" text-anchor="middle" class="lbl">KUL</text><text x="560" y="155" text-anchor="middle" class="lbl">LHR</text>
+      <g class="hero-plane"><path d="M14 0 L-8 -7 L-4 0 L-8 7 Z"/></g>
+    </svg>
+    <a class="btn gold" href="/">Start searching</a>
+  </section>
+
+  <!-- steps -->
+  <section class="how-steps">
+    <article class="step">
+      <span class="step-n">1</span>
+      <div class="art art-search" aria-hidden="true">
+        <div class="fake-input"><span class="typed">Tokyo</span><span class="caret"></span></div>
+        <ul class="fake-suggest"><li><b>Tokyo</b><small>Japan · all airports</small><em>TYO</em></li><li><b>Haneda Airport</b><small>Tokyo, Japan</small><em>HND</em></li></ul>
+      </div>
+      <h2>Search anywhere</h2>
+      <p>Type any city or airport in the world (or tap one on the 3D earth), then pick a month.</p>
+    </article>
+
+    <article class="step">
+      <span class="step-n">2</span>
+      <div class="art art-bars" aria-hidden="true">
+        <div class="bars"><i style="--h:70%"></i><i style="--h:52%"></i><i style="--h:84%"></i><i class="best" style="--h:34%"></i><i style="--h:61%"></i><i style="--h:76%"></i><i style="--h:47%"></i></div>
+        <span class="tag">Cheapest · RM 412</span>
+      </div>
+      <h2>See real prices</h2>
+      <p>You get the cheapest real fare for every date, which airlines fly it, and how each price compares with normal.</p>
+    </article>
+
+    <article class="step">
+      <span class="step-n">3</span>
+      <div class="art art-chart" aria-hidden="true">
+        <svg viewBox="0 0 240 120"><path class="grid" d="M0 30H240M0 60H240M0 90H240"/>
+          <path class="line" d="M5 35 C 40 30, 60 70, 95 88 S 150 92, 170 70 S 215 20, 235 15"/>
+          <circle class="low" cx="125" cy="92" r="5"/></svg>
+        <span class="pill wait">WAIT · likely to drop</span>
+      </div>
+      <h2>Know when to buy</h2>
+      <p>Our model has learned how fares move: seasons, holidays, weekdays, and how close you are to departure. It says <b>BUY</b> or <b>WAIT</b>.</p>
+    </article>
+
+    <article class="step">
+      <span class="step-n">4</span>
+      <div class="art art-book" aria-hidden="true">
+        <span class="chipx" style="--d:0s">Aviasales</span><span class="chipx" style="--d:.15s">Airline site</span>
+        <span class="chipx" style="--d:.3s">Google Flights</span><span class="chipx" style="--d:.45s">Trip.com</span>
+        <span class="chipx" style="--d:.6s">Booking.com</span><span class="chipx" style="--d:.75s">Skyscanner</span>
+        <span class="cursor"></span>
+      </div>
+      <h2>Book where you trust</h2>
+      <p>Click a price to open that exact flight, or compare on the airline's own site and other big booking sites. You pay them, not us.</p>
+    </article>
+
+    <article class="step">
+      <span class="step-n">5</span>
+      <div class="art art-phone" aria-hidden="true">
+        <div class="phone"><div class="notif"><b>✈ KUL → LHR · RM 1,390</b><small>Down 12%: under your target</small></div></div>
+        <span class="bell">🔔</span>
+      </div>
+      <h2>Get a heads-up</h2>
+      <p>Set a price alert by email or Telegram. We message you only when your trip really gets cheaper, at most once a day.</p>
+    </article>
+  </section>
+
+  <!-- data flow -->
+  <section class="how-card">
+    <p class="eyebrow">Where the prices come from</p>
+    <div class="flow" aria-label="Airlines and agencies, to Aviasales, to Skyward, to you">
+      <div class="node"><b>Hundreds of airlines &amp; agencies</b><small>publish their fares</small></div>
+      <div class="pipe"><i></i><i></i><i></i></div>
+      <div class="node"><b>Aviasales</b><small>compares them for millions of searches</small></div>
+      <div class="pipe"><i></i><i></i><i></i></div>
+      <div class="node gold"><b>Skyward</b><small>refreshes every 2–15 min, adds ML</small></div>
+      <div class="pipe"><i></i><i></i><i></i></div>
+      <div class="node"><b>You</b><small>search, decide, book</small></div>
+    </div>
+    <p class="muted">Popular routes are refreshed about every 2 minutes, everything else every 15. Prices are the cheapest real fares
+      people found recently, so the final price on the booking site can differ slightly. Always check before you pay.</p>
+  </section>
+
+  <!-- the forecast in plain words -->
+  <section class="how-grid">
+    <div class="how-card">
+      <p class="eyebrow">The forecast, simply</p>
+      <ul class="ticks">
+        <li><b>Typical price:</b> what this route usually costs, from real fares.</li>
+        <li><b>Booking curve:</b> fares are often high far out, lowest a few weeks before, then climb.</li>
+        <li><b>Season &amp; holidays:</b> Christmas, Chinese New Year, Hari Raya and summer push prices up.</li>
+        <li><b>Day of week:</b> Fridays and Sundays usually cost more.</li>
+      </ul>
+      <p class="muted small">It's a well-informed estimate, not a promise. Average error is shown on the dashboard.</p>
+    </div>
+    <div class="how-card">
+      <p class="eyebrow">Your privacy</p>
+      <ul class="ticks">
+        <li>No account and no tracking.</li>
+        <li>Your alerts are tied to a private key kept in your own browser.</li>
+        <li>Email alerts need one confirmation click, and every message has a one-tap stop link.</li>
+        <li>We never see or store payment details.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="how-card faq">
+    <p class="eyebrow">Questions</p>
+    <details><summary>Do you sell tickets?</summary><p>No. Skyward finds and compares prices, then sends you to the airline or booking site, where you book and pay.</p></details>
+    <details><summary>Why is the price a bit different on the booking site?</summary><p>Fares change constantly. Ours is the cheapest real fare found recently; seats at that price can sell out. Click through to see the live price.</p></details>
+    <details><summary>What does "predicted drop" mean?</summary><p>The model expects that fare to get cheaper before departure, and shows the best day to buy. It's a forecast, not a guarantee, so if the price already suits you, book.</p></details>
+    <details><summary>How do Telegram alerts work?</summary><p>Tick "Also message me on Telegram" when you create an alert. Telegram opens our bot; press <b>Start</b> and you're connected. Send <b>/stop</b> anytime to stop.</p></details>
+    <details><summary>Can I see prices in my currency?</summary><p>Yes. Choose from 160+ currencies at the top of the dashboard; exchange rates update daily.</p></details>
+  </section>
+
+  <section class="how-cta">
+    <h2>Ready when you are.</h2>
+    <a class="btn gold" href="/">Search flights</a>
+  </section>
+</main>
+<footer><p><a href="/">Skyward</a> · <a href="https://github.com/Faryaan-Khan/skyward" target="_blank" rel="noopener">Source on GitHub</a></p></footer>
+<script src="/static/how.js?v=2.2.0" defer></script>
+</body>
+</html>

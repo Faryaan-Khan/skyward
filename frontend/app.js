@@ -92,25 +92,7 @@ $("theme-toggle").addEventListener("click", (e) => {
 applyTheme(document.documentElement.dataset.theme || "dark");
 
 /* ================= airlines & booking sites ================= */
-const AIRLINES = { MH: ["Malaysia Airlines", "malaysiaairlines.com"], AK: ["AirAsia", "airasia.com"], D7: ["AirAsia X", "airasia.com"], FD: ["Thai AirAsia", "airasia.com"],
-  OD: ["Batik Air", "batikair.com"], SQ: ["Singapore Airlines", "singaporeair.com"], TR: ["Scoot", "flyscoot.com"], BA: ["British Airways", "britishairways.com"],
-  EK: ["Emirates", "emirates.com"], QR: ["Qatar Airways", "qatarairways.com"], EY: ["Etihad", "etihad.com"], TK: ["Turkish Airlines", "turkishairlines.com"],
-  CX: ["Cathay Pacific", "cathaypacific.com"], NH: ["ANA", "ana.co.jp"], JL: ["Japan Airlines", "jal.co.jp"], QF: ["Qantas", "qantas.com"],
-  VA: ["Virgin Australia", "virginaustralia.com"], AF: ["Air France", "airfrance.com"], KL: ["KLM", "klm.com"], LH: ["Lufthansa", "lufthansa.com"],
-  LX: ["SWISS", "swiss.com"], AA: ["American Airlines", "aa.com"], DL: ["Delta", "delta.com"], UA: ["United", "united.com"], B6: ["JetBlue", "jetblue.com"],
-  WN: ["Southwest", "southwest.com"], AS: ["Alaska Airlines", "alaskaair.com"], NK: ["Spirit", "spirit.com"], F9: ["Frontier", "flyfrontier.com"],
-  VY: ["Vueling", "vueling.com"], U2: ["easyJet", "easyjet.com"], FR: ["Ryanair", "ryanair.com"], W6: ["Wizz Air", "wizzair.com"], WY: ["Oman Air", "omanair.com"],
-  SV: ["Saudia", "saudia.com"], GA: ["Garuda Indonesia", "garuda-indonesia.com"], PR: ["Philippine Airlines", "philippineairlines.com"],
-  "5J": ["Cebu Pacific", "cebupacificair.com"], VJ: ["VietJet", "vietjetair.com"], VN: ["Vietnam Airlines", "vietnamairlines.com"], TG: ["Thai Airways", "thaiairways.com"],
-  ZG: ["ZIPAIR", "zipair.net"], JQ: ["Jetstar", "jetstar.com"], "3K": ["Jetstar Asia", "jetstar.com"], KE: ["Korean Air", "koreanair.com"], OZ: ["Asiana", "flyasiana.com"],
-  CI: ["China Airlines", "china-airlines.com"], BR: ["EVA Air", "evaair.com"], CA: ["Air China", "airchina.com"], MU: ["China Eastern", "ceair.com"],
-  CZ: ["China Southern", "csair.com"], AI: ["Air India", "airindia.com"], "6E": ["IndiGo", "goindigo.in"], IB: ["Iberia", "iberia.com"], AY: ["Finnair", "finnair.com"],
-  SK: ["SAS", "flysas.com"], AC: ["Air Canada", "aircanada.com"], NZ: ["Air New Zealand", "airnewzealand.com"], ET: ["Ethiopian", "ethiopianairlines.com"],
-  MS: ["EgyptAir", "egyptair.com"], UL: ["SriLankan", "srilankan.com"], PG: ["Bangkok Airways", "bangkokair.com"], SL: ["Thai Lion Air", "lionairthai.com"],
-  QZ: ["Indonesia AirAsia", "airasia.com"], Z2: ["Philippines AirAsia", "airasia.com"], HX: ["Hong Kong Airlines", "hongkongairlines.com"],
-  UO: ["HK Express", "hkexpress.com"], MM: ["Peach", "flypeach.com"], "7C": ["Jeju Air", "jejuair.net"], TW: ["T'way Air", "twayair.com"],
-  FZ: ["flydubai", "flydubai.com"], G9: ["Air Arabia", "airarabia.com"], PC: ["Pegasus", "flypgs.com"], A3: ["Aegean", "aegeanair.com"], TP: ["TAP Air Portugal", "flytap.com"],
-  EI: ["Aer Lingus", "aerlingus.com"], LO: ["LOT", "lot.com"], OS: ["Austrian", "austrian.com"], SN: ["Brussels Airlines", "brusselsairlines.com"], WS: ["WestJet", "westjet.com"] };
+const AIRLINES = window.AIRLINES || {};   // directory in /static/airlines.js
 const airlineName = (code) => (AIRLINES[code] ? AIRLINES[code][0] : code || "–");
 const dmy = (date) => ({ y: date.slice(0, 4), m: date.slice(5, 7), d: date.slice(8, 10) });
 const aviasalesUrl = (o, d, date, link) => safeUrl(link) || `https://www.aviasales.com/search/${o}${dmy(date).d}${dmy(date).m}${d}1`;
@@ -307,7 +289,7 @@ async function runSearch({ silent = false } = {}) {
   history.replaceState(null, "", `?from=${o}&to=${d}&month=${month}`);
   if (!silent) ["s-cheapest", "s-typical", "s-call"].forEach((id) => $(id).classList.add("loading"));
   try {
-    const s = await api(`/api/search?origin=${o}&destination=${d}&month=${month}`);
+    const s = await api(`/api/search?origin=${o}&destination=${d}&month=${month}${silent ? "&background=1" : ""}`);
     const keep = silent && s.fares.some((f) => f.depart === state.selected) ? state.selected : null;
     state.search = s; state.selected = keep;
     if (!$("from").dataset.name || $("from").dataset.name === o) setPlace($("from"), o, s.route.origin_name);
@@ -354,8 +336,30 @@ function renderSearch() {
       <td>${vsTxt}</td><td>${outlook}</td>
       <td title="${esc(f.carrier || "")}">${esc(airlineName(f.carrier))}${f.flight_number ? ` <small class="muted">${esc(f.carrier || "")}${esc(f.flight_number)}</small>` : ""}</td>
       <td>${f.transfers === 0 ? "Direct" : f.transfers ?? "–"}</td>
-      <td><details class="book"><summary>Compare ▾</summary><div class="menu">${providerLinks(r.origin, r.dest, f.depart, f.link, f.carrier, "")}</div></details></td></tr>`;
+      <td><details class="book"><summary>Compare${f.offers?.length > 1 ? ` ${f.offers.length} airlines` : ""} ▾</summary><div class="menu">
+        ${f.offers?.length ? `<p class="menu-h">Airlines on this date</p>${offerLinks(r, f.depart, f.offers)}<p class="menu-h">Search other sites</p>` : ""}
+        ${providerLinks(r.origin, r.dest, f.depart, f.link, f.carrier, "")}</div></details></td></tr>`;
   }).join("") : `<tr><td colspan="7" class="empty">No cached fares for this month yet. Try another month, or check the booking sites above.</td></tr>`;
+  renderAirlines();
+}
+
+// each airline's real offer for one date: price links to that exact offer
+function offerLinks(r, date, offers) {
+  return offers.map((x) => `<a href="${esc(aviasalesUrl(r.origin, r.dest, date, x.link))}" target="_blank" rel="noopener sponsored">
+    <i style="background:#c9a96b"></i><span class="grow">${esc(airlineName(x.carrier))}<small> · ${x.transfers === 0 ? "direct" : `${x.transfers ?? "?"} stop`}</small></span><b>${money(x.price)}</b></a>`).join("");
+}
+
+// "Compare airlines" card: every airline's cheapest fare this month on the route
+function renderAirlines() {
+  const s = state.search, list = s?.airlines || [];
+  $("airline-count").textContent = list.length ? `${list.length} airlines found` : "";
+  $("airline-body").innerHTML = list.length ? list.map((a, i) => {
+    const r = s.route, site = AIRLINES[a.carrier];
+    return `<tr><td><b>${esc(airlineName(a.carrier))}</b> <small class="muted">${esc(a.carrier)}</small>${i === 0 ? ' <span class="chip good">cheapest</span>' : ""}</td>
+      <td><a class="price" href="${esc(aviasalesUrl(r.origin, r.dest, a.depart, a.link))}" target="_blank" rel="noopener sponsored" title="Open this exact fare">${money(a.price)} ↗</a></td>
+      <td>${fmtDay(a.depart)}</td><td>${a.transfers === 0 ? "Direct" : a.transfers ?? "–"}</td><td>${a.dates} ${a.dates === 1 ? "date" : "dates"}</td>
+      <td>${site ? `<a href="https://www.${esc(site[1])}" target="_blank" rel="noopener">${esc(site[1])} ↗</a>` : '<span class="muted">–</span>'}</td></tr>`;
+  }).join("") : `<tr><td colspan="6" class="empty">Search a route to compare airlines.</td></tr>`;
 }
 $("fare-body").addEventListener("click", (e) => {
   if (e.target.closest("details, a")) return;
@@ -571,5 +575,6 @@ async function init() {
 init();
 
 setInterval(() => { if (!document.hidden) { loadStatus(); loadDrops(); loadDeals(); } }, 60_000);
-setInterval(() => { if (!document.hidden && state.route) runSearch({ silent: true }); }, 5 * 60_000);
+// live prices: re-check the open route every minute (the server re-fetches anything older than ~2 min)
+setInterval(() => { if (!document.hidden && state.route) runSearch({ silent: true }); }, 60_000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) loadStatus(); });

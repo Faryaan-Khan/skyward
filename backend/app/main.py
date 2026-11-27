@@ -127,14 +127,33 @@ def _refresh_job() -> bool:
     return True
 
 
+QUICK_SECONDS = int(os.getenv("QUICK_REFRESH_SECONDS", "120"))
+
+
+def _quick_job() -> bool:
+    """Fast price refresh for the busiest routes (~every 2 min). Only one server runs it at a time."""
+    if not db.try_acquire("quick", QUICK_SECONDS - 10):
+        return False
+    try:
+        n = ingest.quick_refresh()
+        if n:
+            ingest.check_watches(model())  # anti-spam rules still apply
+            for k in [k for k in _cache if k.startswith(("live:", "deals", "drops", "status"))]:
+                _cache.pop(k, None)
+    except Exception as e:
+        log.warning("quick refresh failed: %s", e)
+    return True
+
+
 async def _auto_refresh():
-    """Every worker checks each minute; the shared DB lock lets only one run each refresh."""
+    """Every worker checks every 30 s; shared DB locks let only one server run each job."""
     while True:
         try:
-            await asyncio.to_thread(_refresh_job)
+            await asyncio.to_thread(_refresh_job)   # full: all routes, 3-6 months, retrain (every 15 min)
+            await asyncio.to_thread(_quick_job)     # fast: active routes, 2 months (every ~2 min)
         except Exception as e:
             log.warning("auto refresh error: %s", e)
-        await asyncio.sleep(60)
+        await asyncio.sleep(30)
 
 
 @asynccontextmanager
@@ -351,7 +370,7 @@ def events():
 # ---- search ----
 
 @app.get("/api/search")
-def search(origin: str, destination: str, request: Request, month: str | None = None):
+def search(origin: str, destination: str, request: Request, month: str | None = None, background: bool = False):
     """Live fares for any city pair for one month, with the model's view of each date."""
     o, d = origin.strip().upper(), destination.strip().upper()
     if not (IATA.match(o) and IATA.match(d)) or o == d:
@@ -366,7 +385,10 @@ def search(origin: str, destination: str, request: Request, month: str | None = 
     route = f"{o}-{d}"
 
     _rate_limit(request, "search", SEARCH_LIMIT_PER_MIN)
-    ingest.register_search(route)
+    if background:   # the page's own auto-refresh: keep prices fresh but don't count it as a search
+        ingest.ensure_route(route)
+    else:
+        ingest.register_search(route)
     if travelpayouts.enabled() and not ingest.month_is_fresh(route, month):
         try:
             ingest.fetch_route_month(route, month)
@@ -394,12 +416,14 @@ def search(origin: str, destination: str, request: Request, month: str | None = 
     expected = m.predict_frame(pd.DataFrame({"route": route, "depart": [r["depart"] for r in rows],
                                              "observed": today}), bases={route: base})
     outlooks = m.drop_outlook([(base, r["depart"]) for r in rows])
+    offers = _offers(route, start, end)
     for r, e, (drop, best_day) in zip(rows, expected, outlooks):
         out["fares"].append({
             "depart": r["depart"].isoformat(), "price": round(r["price"], 2), "carrier": r["carrier"],
             "flight_number": r["flight_number"], "transfers": r["transfers"], "link": r["link"],
             "expected": round(float(e), 2), "vs_expected_pct": round((r["price"] / e - 1) * 100, 1),
             "predicted_drop_pct": round(drop * 100, 1), "best_buy_date": best_day.isoformat(),
+            "offers": offers.get(r["depart"], []),
         })
     cheapest = min(out["fares"], key=lambda x: x["price"])
     adv = m.advise(route, dt.date.fromisoformat(cheapest["depart"]), cheapest["price"], base=base)
@@ -407,7 +431,35 @@ def search(origin: str, destination: str, request: Request, month: str | None = 
         "cheapest": cheapest, "typical_price": round(base, 2),
         "dates_found": len(out["fares"]), "advice": {k: v for k, v in adv.items() if k != "curve"},
     }
+    out["airlines"] = _airline_summary(offers)
     return out
+
+
+def _offers(route: str, start: dt.date, end: dt.date) -> dict[dt.date, list[dict]]:
+    """Every airline's cheapest offer per date (latest snapshot)."""
+    o = db.fare_offers.c
+    with db.connect() as c:
+        rows = db.rows(c.execute(select(o.depart, o.carrier, o.price, o.transfers, o.flight_number, o.link)
+                                 .where(and_(o.route == route, o.depart >= start, o.depart < end))
+                                 .order_by(o.depart, o.price)))
+    out: dict[dt.date, list[dict]] = {}
+    for r in rows:
+        out.setdefault(r["depart"], []).append({"carrier": r["carrier"], "price": round(r["price"], 2),
+                                                 "transfers": r["transfers"], "flight_number": r["flight_number"],
+                                                 "link": r["link"]})
+    return out
+
+
+def _airline_summary(offers: dict) -> list[dict]:
+    """Each airline's cheapest fare this month on the route (cheapest airline first)."""
+    best: dict[str, dict] = {}
+    count: dict[str, int] = {}
+    for day, lst in offers.items():
+        for x in lst:
+            count[x["carrier"]] = count.get(x["carrier"], 0) + 1
+            if x["carrier"] not in best or x["price"] < best[x["carrier"]]["price"]:
+                best[x["carrier"]] = {**x, "depart": day.isoformat()}
+    return sorted(({**v, "dates": count[k]} for k, v in best.items()), key=lambda v: v["price"])
 
 
 # ---- per-route data ----
@@ -539,7 +591,11 @@ def deals(response: Response, limit: int = 12):
         df["discount_pct"] = (1 - df["price"] / df["expected"]) * 100
         df["saving"] = df["expected"] - df["price"]
         df = df[df["discount_pct"] > 15].sort_values(["discount_pct", "saving"], ascending=False)
-        df = df.drop_duplicates(["route", "depart"]).head(limit)
+        # variety: best deal per route, one route per destination, at most two per origin
+        df = df.drop_duplicates("route")
+        df["o"], df["d"] = df["route"].str[:3], df["route"].str[4:]
+        df = df.drop_duplicates("d")
+        df = df[df.groupby("o").cumcount() < 2].head(limit)
         meta = _route_meta(df["route"].unique().tolist())
         return [{
             **{k: v for k, v in _meta_out(r.route, meta.get(r.route)).items() if k in ("origin_name", "dest_name")},
@@ -816,3 +872,7 @@ if os.path.isdir(FRONTEND):
     @app.get("/")
     def index():
         return FileResponse(os.path.join(FRONTEND, "index.html"))
+
+    @app.get("/how")
+    def how_it_works():
+        return FileResponse(os.path.join(FRONTEND, "how.html"))
