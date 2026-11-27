@@ -1,13 +1,41 @@
+<div align="center">
+
 # ✈ Skyward
 
-**Live flight prices, ML fare forecasting, deal detection and price alerts.**
+**Live flight prices, ML fare forecasts and price alerts: know when to book.**
 
-![CI](https://github.com/Faryaan-Khan/skyward/actions/workflows/ci.yml/badge.svg)
+[![Live demo](https://img.shields.io/badge/live%20demo-skyward--tv5y.onrender.com-2ecc8f?style=flat-square)](https://skyward-tv5y.onrender.com)
+[![CI](https://img.shields.io/github/actions/workflow/status/Faryaan-Khan/skyward/ci.yml?branch=main&label=tests&style=flat-square)](https://github.com/Faryaan-Khan/skyward/actions/workflows/ci.yml)
+[![Price refresh](https://img.shields.io/github/actions/workflow/status/Faryaan-Khan/skyward/refresh.yml?branch=main&label=price%20refresh&style=flat-square)](https://github.com/Faryaan-Khan/skyward/actions/workflows/refresh.yml)
+![Python](https://img.shields.io/badge/python-3.12-3776ab?style=flat-square&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169e1?style=flat-square&logo=postgresql&logoColor=white)
+![scikit-learn](https://img.shields.io/badge/scikit--learn-f7931e?style=flat-square&logo=scikitlearn&logoColor=white)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
+
+[**Open the live site →**](https://skyward-tv5y.onrender.com) &nbsp;·&nbsp; [API docs](https://skyward-tv5y.onrender.com/docs)
+
+<img src="docs/screenshot.png" alt="Skyward dashboard: buy/wait forecast, live fares table, price history and deals" width="820">
+
+</div>
 
 Skyward pulls real fares every 15 minutes, learns how prices move, and tells you *when* to book. A
 gradient-boosted model predicts what a fare will cost on every day between now and departure, so you
 get a clear **BUY / WAIT** call, the expected lowest price and the best day to buy. Set a watch and
 Skyward notifies you by email or Telegram when it's time.
+
+> The live site runs on Render's free plan, so the first visit after a quiet spell can take up to a
+> minute to wake up.
+
+## Tech stack
+
+| Layer | Tools |
+| --- | --- |
+| API & web | FastAPI, Uvicorn, vanilla JS + Chart.js |
+| Data | PostgreSQL (Neon) via SQLAlchemy, SQLite for local dev |
+| ML | scikit-learn `HistGradientBoostingRegressor`, pandas, NumPy |
+| Live prices | Travelpayouts / Aviasales Data API |
+| Hosting & automation | Render (auto-deploy from `main`), GitHub Actions (tests + 15-minute refresh) |
 
 ## Features
 
@@ -61,18 +89,20 @@ Limits worth knowing:
   17 July 2026.)
 - Prices are in USD.
 
-## Go live (free): step by step
+## Deploy your own (free)
 
-You need three free accounts. Do the sign-ups yourself; never paste passwords or tokens into code.
+You need three free accounts. Keep tokens and passwords in the services' settings, never in code.
 
 1. **Travelpayouts** (live prices): sign up at travelpayouts.com, join the **Aviasales** program,
    then copy your **API token** from your profile. Your **marker** (partner ID) is optional and
    earns commission on "Book" clicks.
 2. **Neon** (database): sign up at neon.tech, create a project, and copy the **connection string**
    (starts with `postgresql://…?sslmode=require`).
-3. **Render** (website): sign up at render.com with GitHub → **New → Blueprint** → choose this repo.
-   It reads `render.yaml`. When asked, paste `DATABASE_URL` (Neon), `TRAVELPAYOUTS_TOKEN` and
-   optionally `TRAVELPAYOUTS_MARKER`. Deploy, then copy your site URL (e.g. `https://skyward-xxxx.onrender.com`).
+3. **Render** (website): sign up at render.com with GitHub, give Render's GitHub app access to the
+   repo, then **New → Blueprint** → choose the repo. It reads `render.yaml`. When asked, paste
+   `DATABASE_URL` (Neon), `TRAVELPAYOUTS_TOKEN` and optionally `TRAVELPAYOUTS_MARKER`. Deploy, then
+   copy your site URL (e.g. `https://skyward-xxxx.onrender.com`). Every push to `main` now redeploys
+   automatically.
 4. **GitHub** (keeps it refreshing while nobody is visiting): in this repo, go to Settings → Secrets and
    variables → Actions → **Variables** and add `SITE_URL` = your Render URL. No secrets needed: the
    site fetches prices itself, and the workflow only wakes it every 15 minutes.
@@ -117,6 +147,12 @@ The target is log price, trained with scikit-learn's `HistGradientBoostingRegres
 baseline history plus every live snapshot collected so far, so the model learns more about real prices
 the longer it runs. Flash-sale observations are excluded from training so the model learns the
 normal market, which is what lets it spot deals as outliers.
+
+**Calibration.** The synthetic history provides the *shape* of prices (seasonality, holidays, booking
+curve), and the live fares set the *level*. Before each training run, every route's synthetic prices
+are rescaled so their median matches the median real fare over the same booking horizon. The price-history
+chart uses the same scaling. Without this step the model expected fares about 2–3× too high and flagged
+nearly every real fare as a "60% off" deal. With it, the model's error (MAE) dropped from about $20 to about $8.
 
 ## API
 

@@ -53,6 +53,11 @@ def test_live_ingest_and_endpoints():
         deals = c.get("/api/deals").json()
         assert deals and all(d["source"] == "travelpayouts" for d in deals)
 
+        # history is calibrated to the real price level: no cliff between demo and live weeks
+        h = c.get("/api/history/KUL-LHR").json()
+        older = sorted(x["avg"] for x in h[:-2])
+        assert 0.5 < h[-1]["avg"] / older[len(older) // 2] < 2
+
         ingest.retrain()
         assert c.post("/api/admin/reload-model", headers={"X-Admin-Token": "test-admin"}).json()["changed"]
 

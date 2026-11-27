@@ -173,14 +173,21 @@ def history(route: str, response: Response):
     response.headers["Cache-Control"] = f"public, max-age={CACHE_SECONDS}"
 
     def build():
+        f = db.fares.c
+        synthetic = (f.source == "synthetic").label("synthetic")
         with db.connect() as c:
             daily = pd.DataFrame(db.rows(c.execute(
-                select(db.fares.c.observed, func.min(db.fares.c.price).label("low"),
-                       func.avg(db.fares.c.price).label("avg"), func.count().label("n"))
-                .where(db.fares.c.route == route).group_by(db.fares.c.observed).order_by(db.fares.c.observed)
+                select(f.observed, synthetic, func.min(f.price).label("low"),
+                       func.avg(f.price).label("avg"), func.count().label("n"))
+                .where(f.route == route).group_by(f.observed, synthetic).order_by(f.observed)
             )))
         if daily.empty:
             return []
+        # Put the synthetic baseline on the same level as real fares (same calibration as the model)
+        real, synth = daily[~daily["synthetic"].astype(bool)], daily[daily["synthetic"].astype(bool)]
+        if len(real) and len(synth):
+            factor = (real["avg"] * real["n"]).sum() / real["n"].sum() / ((synth["avg"] * synth["n"]).sum() / synth["n"].sum())
+            daily.loc[daily["synthetic"].astype(bool), ["low", "avg"]] *= factor
         daily["observed"] = pd.to_datetime(daily["observed"])
         daily["w"] = daily["avg"] * daily["n"]
         wk = daily.set_index("observed").resample("W-MON", label="left", closed="left").agg(
