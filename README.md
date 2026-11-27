@@ -13,7 +13,7 @@
 ![scikit-learn](https://img.shields.io/badge/scikit--learn-f7931e?style=flat-square&logo=scikitlearn&logoColor=white)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 
-[**Open the live site →**](https://skyward-tv5y.onrender.com) &nbsp;·&nbsp; [API docs](https://skyward-tv5y.onrender.com/docs)
+[**Open the live site →**](https://skyward-tv5y.onrender.com) &nbsp;·&nbsp; [Releases](https://github.com/Faryaan-Khan/skyward/releases) &nbsp;·&nbsp; [Security](SECURITY.md)
 
 <img src="docs/screenshot.png" alt="Skyward dashboard at night: flight search, great-circle route on a globe, predicted price drops" width="820">
 
@@ -36,7 +36,7 @@ to **drop**. Set a watch and Skyward notifies you by email or Telegram when it's
 
 | Layer | Tools |
 | --- | --- |
-| API & web | FastAPI, Uvicorn, vanilla JS + Chart.js |
+| API & web | FastAPI, Uvicorn, vanilla JS, Chart.js, globe.gl (three.js) for the 3D earth |
 | Data | PostgreSQL (Neon) via SQLAlchemy, SQLite for local dev |
 | ML | scikit-learn `HistGradientBoostingRegressor`, pandas, NumPy |
 | Live prices | Travelpayouts / Aviasales Data API |
@@ -47,20 +47,34 @@ to **drop**. Set a watch and Skyward notifies you by email or Telegram when it's
 - **Worldwide search**: type any city or airport (autocomplete covers every IATA code). The cheapest
   real fare for each date of the month appears in seconds; routes people search are then refreshed
   automatically every 15 minutes.
-- **Compare & book**: every date links straight to the same search on Aviasales, Google Flights,
-  Skyscanner, Kayak, Expedia and Momondo. Skyward never takes payments; you book on the airline's or
-  agency's own site.
+- **Book at the source**: every real price links to that exact offer on Aviasales (a metasearch over
+  hundreds of airlines and agencies). "Compare" opens the same search on the operating airline's site,
+  Google Flights, Skyscanner, Trip.com, Booking.com, Expedia, Kayak, Cheapflights and Momondo. Skyward
+  never takes payments.
+- **Interactive 3D earth**: NASA imagery (city lights at night), drag to spin, zoom, and tap any of
+  ~3,700 airports to fly from or to it.
+- **Popular this week**: recomputed weekly from Skyward searches plus worldwide demand from 15 hubs.
 - **Any currency**: prices shown in 160+ currencies with daily exchange rates; your choice is remembered.
 - **Predicted price drops**: the model scans live fares and highlights the ones it expects to get
   cheaper, by how much, and the best day to buy.
 - **Buy-or-wait advice**: sweeps every possible purchase day and reports the expected low, the best
   buy date and the model's error band (MAE on a held-out split).
 - **Deals**: real fares more than 15% under the model's expected price for that route and date.
-- **Private price alerts**: each watch gets a secret manage token kept in the visitor's browser, so
-  nobody can see anyone else's watches or email address. Alerts go out at most once a day per watch.
-- **Luxury dashboard**: dark charcoal and gold with an animated great-circle flight path on a globe,
-  plus a day mode (the sun/moon toggle morphs and the page cross-fades). Works on phones.
-- **REST API** with interactive docs at `/docs`.
+- **Price alerts that don't spam**: email (double opt-in) or Telegram (one tap). Alerts fire only on
+  real, buyable prices, at most once a day per trip, only after a further 5% drop, 8 per trip max,
+  with one-click unsubscribe. Alerts are private to the browser that created them.
+- **Luxury dashboard**: dark charcoal and gold, plus a soft day mode (the sun/moon toggle morphs and
+  the page cross-fades). Works on phones.
+- **Secure by default**: see [SECURITY.md](SECURITY.md).
+
+### Setting up alerts (owner)
+- **Email**: create a Gmail account for the app (e.g. skyward.alerts@gmail.com), turn on 2-Step
+  Verification, create an *App password*, then in Render set `SMTP_USER` (the address) and
+  `SMTP_PASSWORD` (the app password). `SMTP_HOST`/`SMTP_PORT` default to Gmail.
+- **Telegram**: message @BotFather → `/newbot` → copy the token into Render as `TELEGRAM_BOT_TOKEN`.
+  The webhook registers itself on the next deploy.
+
+Developer API docs are available locally with `ENABLE_DOCS=1` (they're off on the public site).
 
 ## Architecture (built to scale)
 

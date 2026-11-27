@@ -24,14 +24,14 @@ import time
 from contextlib import asynccontextmanager
 
 import pandas as pd
-from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
-from sqlalchemy import and_, delete, func, insert, select
+from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy import and_, delete, func, insert, or_, select, update
 
-from . import __version__, db, ingest
+from . import __version__, db, ingest, notify, security
 from .model import FareForecaster
 from .sources import rates as fx
 from .sources import travelpayouts
@@ -45,6 +45,9 @@ CACHE_SECONDS = int(os.getenv("CACHE_SECONDS", "60"))
 REFRESH_MINUTES = int(os.getenv("REFRESH_MINUTES", "15"))
 AUTO_REFRESH = os.getenv("AUTO_REFRESH", "1") != "0"
 SEARCH_LIMIT_PER_MIN = int(os.getenv("SEARCH_LIMIT_PER_MIN", "20"))
+API_LIMIT_PER_MIN = int(os.getenv("API_LIMIT_PER_MIN", "240"))
+MAX_BODY_BYTES = 16 * 1024
+ENABLE_DOCS = os.getenv("ENABLE_DOCS", "0") == "1"   # API docs are for developers; off on the public site
 IATA = re.compile(r"^[A-Z]{3}$")
 ROUTE_RE = re.compile(r"^[A-Z]{3}-[A-Z]{3}$")
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
@@ -135,6 +138,8 @@ async def lifespan(_: FastAPI):
     ingest.seed_featured_routes()
     _load_latest_model()
     tasks = [asyncio.create_task(_model_watcher())]
+    if notify.telegram_enabled():
+        tasks.append(asyncio.create_task(asyncio.to_thread(notify.setup_telegram_webhook)))
     if travelpayouts.enabled():  # look up city names/coordinates for routes that lack them
         tasks.append(asyncio.create_task(asyncio.to_thread(ingest.fill_route_meta)))
     if AUTO_REFRESH:
@@ -145,8 +150,49 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Skyward", version=__version__, lifespan=lifespan,
-              description="Worldwide live flight prices, ML fare forecasts and price alerts.")
+              description="Worldwide live flight prices, ML fare forecasts and price alerts.",
+              docs_url="/docs" if ENABLE_DOCS else None, redoc_url=None,
+              openapi_url="/openapi.json" if ENABLE_DOCS else None)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+CSP = "; ".join([
+    "default-src 'self'",
+    "script-src 'self' https://cdn.jsdelivr.net",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src https://fonts.gstatic.com",
+    "img-src 'self' data: blob: https://cdn.jsdelivr.net",
+    "connect-src 'self' https://cdn.jsdelivr.net",
+    "worker-src 'self' blob:",
+    "object-src 'none'", "base-uri 'self'", "form-action 'self'", "frame-ancestors 'none'",
+])
+SECURITY_HEADERS = {
+    "Content-Security-Policy": CSP,
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+    "Cross-Origin-Opener-Policy": "same-origin",
+}
+
+
+@app.middleware("http")
+async def guard(request: Request, call_next):
+    """Basic protection for every request: body size cap, per-visitor API rate limit, security headers."""
+    path = request.url.path
+    if request.method in ("POST", "PUT", "PATCH") and int(request.headers.get("content-length") or 0) > MAX_BODY_BYTES:
+        return JSONResponse({"detail": "Request too large"}, status_code=413)
+    if path.startswith("/api/") and path != "/api/telegram/webhook":
+        try:
+            _rate_limit(request, "api", API_LIMIT_PER_MIN)
+        except HTTPException as e:
+            return JSONResponse({"detail": e.detail}, status_code=429, headers={"Retry-After": "60"})
+    resp = await call_next(request)
+    for k, v in SECURITY_HEADERS.items():
+        if k == "Content-Security-Policy" and path in ("/docs", "/openapi.json"):
+            continue  # Swagger UI needs its own inline scripts (docs are off in production)
+        resp.headers.setdefault(k, v)
+    return resp
 
 
 def model() -> FareForecaster:
@@ -261,13 +307,32 @@ def places(q: str, request: Request, response: Response):
 
 @app.get("/api/routes")
 def routes():
-    """Featured routes plus the routes people search most."""
+    """This week's popular routes (Skyward searches + worldwide demand), then featured routes."""
     def build():
         with db.connect() as c:
-            rows = db.rows(c.execute(select(db.routes).order_by(
-                db.routes.c.featured.desc(), db.routes.c.searches.desc()).limit(40)))
-        return [_meta_out(r["code"], r) for r in rows]
+            pop = db.rows(c.execute(select(db.popular).order_by(db.popular.c.rank)))
+            meta = _route_meta([p["code"] for p in pop])
+            featured = db.rows(c.execute(select(db.routes).where(db.routes.c.featured.is_(True))))
+        out = [{**_meta_out(p["code"], meta.get(p["code"])), "rank": p["rank"],
+                "reason": "Trending worldwide" if p["worldwide"] and not p["user_searches"]
+                else f"{p['user_searches']} searches this week" if not p["worldwide"]
+                else f"Trending · {p['user_searches']} searches", "updated": _iso(p["updated"])} for p in pop]
+        seen = {o["code"] for o in out}
+        out += [{**_meta_out(r["code"], r), "rank": None, "reason": "Featured", "updated": None}
+                for r in featured if r["code"] not in seen]
+        return out
     return cached("routes", build)
+
+
+@app.get("/api/airports")
+def airports(response: Response):
+    """Every flightable airport in the world (for the interactive globe). Cached for a day."""
+    response.headers["Cache-Control"] = "public, max-age=86400"
+    try:
+        return cached("airports", travelpayouts.airports, seconds=86400)
+    except Exception as e:
+        log.warning("airports load failed: %s", e)
+        raise HTTPException(502, "Airport list is temporarily unavailable")
 
 
 @app.get("/api/events")
@@ -464,14 +529,16 @@ def deals(response: Response, limit: int = 12):
         df["expected"] = model().predict_frame(df, bases={k: v for k, v in extra.items() if not model().base(k)})
         df = df.dropna(subset=["expected"])
         df["discount_pct"] = (1 - df["price"] / df["expected"]) * 100
-        df = df[df["discount_pct"] > 15].sort_values("discount_pct", ascending=False)
+        df["saving"] = df["expected"] - df["price"]
+        df = df[df["discount_pct"] > 15].sort_values(["discount_pct", "saving"], ascending=False)
         df = df.drop_duplicates(["route", "depart"]).head(limit)
         meta = _route_meta(df["route"].unique().tolist())
         return [{
             **{k: v for k, v in _meta_out(r.route, meta.get(r.route)).items() if k in ("origin_name", "dest_name")},
             "route": r.route, "observed": r.observed.isoformat(), "depart": r.depart.isoformat(),
             "price": round(r.price, 2), "expected": round(r.expected, 2), "discount_pct": round(r.discount_pct, 1),
-            "is_sale": bool(r.is_sale), "source": r.source, "carrier": r.carrier, "link": r.link,
+            "saving": round(r.saving, 2), "is_sale": bool(r.is_sale), "source": r.source, "carrier": r.carrier,
+            "link": r.link,
         } for r in df.itertuples()]
     return cached(f"deals:{limit}", build)
 
@@ -522,42 +589,177 @@ def drops(response: Response, limit: int = 12):
 
 # ---- Price watches: private to whoever created them (manage token) ----
 
+MAX_WATCHES_PER_EMAIL = 20
+MAX_CONFIRM_EMAILS_PER_DAY = 3     # stops anyone using Skyward to flood someone else's inbox
+
+
 class WatchIn(BaseModel):
     route: str
     depart: dt.date
-    target_price: float | None = Field(default=None, gt=0)  # USD
-    email: str | None = Field(default=None, max_length=255)
-    telegram_chat_id: str | None = Field(default=None, max_length=64)
+    target_price: float | None = Field(default=None, gt=0, lt=1_000_000)  # USD
+    email: EmailStr | None = None
+    telegram: bool = False
 
 
 def _public_watch(w: dict) -> dict:
     return {"id": w["id"], "route": w["route"], "depart": w["depart"].isoformat(),
             "target_price": w["target_price"], "has_email": bool(w["email"]),
-            "has_telegram": bool(w["telegram_chat_id"])}
+            "email_verified": bool(w["email_verified"]), "has_telegram": bool(w["telegram_chat_id"]),
+            "telegram_link": _telegram_link(w["id"]) if not w["telegram_chat_id"] else None,
+            "alerts_sent": w["alert_count"]}
+
+
+def _telegram_link(watch_id: int) -> str | None:
+    bot = notify.bot_username()
+    return f"https://t.me/{bot}?start=w{watch_id}_{security.sign('tg', watch_id)}" if bot else None
+
+
+def _send_confirmation(watch_id: int, email: str, route: str, depart: dt.date) -> None:
+    base = notify.public_url()
+    confirm = f"{base}/api/watches/confirm?w={watch_id}&s={security.sign('confirm', watch_id)}"
+    unsub = f"{base}/api/watches/unsubscribe?w={watch_id}&s={security.sign('unsub', watch_id)}"
+    trip = f"{route[:3]} → {route[4:]} on {depart:%a %d %b %Y}"
+    notify.send_email(
+        email, "Confirm your Skyward price alert",
+        f"Please confirm your price alert for {trip}: {confirm}\n\nIf you didn't ask for this, ignore this email.",
+        notify.email_html("Confirm your price alert", [f"You asked Skyward to watch <b>{trip}</b>.",
+                          "Confirm and we'll email you only when the real price drops: never more than once a day."],
+                          ("Confirm alert", confirm), "Didn't ask for this? Just ignore this email; nothing will be sent."),
+        unsub)
+
+
+def _token_filter(tokens: list[str]):
+    """Match manage tokens (stored hashed; plain-text from v2.0 still accepted)."""
+    return or_(db.watches.c.token.in_([security.hash_token(t) for t in tokens]), db.watches.c.token.in_(tokens))
 
 
 @app.post("/api/watches", status_code=201)
-def create_watch(w: WatchIn):
+def create_watch(w: WatchIn, request: Request, background: BackgroundTasks):
+    _rate_limit(request, "watch-create", 10)
     w.route = _check_route(w.route)
     if w.depart <= dt.date.today():
         raise HTTPException(400, "Departure must be in the future")
+    if not w.email and not w.telegram:
+        raise HTTPException(400, "Add an email address or choose Telegram so we can reach you")
+    email = str(w.email).lower() if w.email else None
+    send_confirm = False
+    if email:
+        if not notify.email_enabled():
+            raise HTTPException(503, "Email alerts aren't switched on yet. Use Telegram for now.")
+        day_ago = ingest._utcnow() - dt.timedelta(days=1)
+        with db.connect() as c:
+            W = db.watches.c
+            total = c.execute(select(func.count()).where(W.email == email)).scalar()
+            verified = c.execute(select(func.count()).where(and_(W.email == email, W.email_verified.is_(True)))).scalar()
+            recent = c.execute(select(func.count()).where(and_(W.email == email, W.email_verified.is_(False),
+                                                               W.created >= day_ago))).scalar()
+        if total >= MAX_WATCHES_PER_EMAIL:
+            raise HTTPException(429, "This email already has the maximum number of alerts")
+        send_confirm = not verified
+        if send_confirm and recent >= MAX_CONFIRM_EMAILS_PER_DAY:
+            raise HTTPException(429, "Too many unconfirmed alerts for this email today. Check your inbox.")
+    if w.telegram and not notify.telegram_enabled():
+        raise HTTPException(503, "Telegram alerts aren't switched on yet")
     token = secrets.token_urlsafe(24)
     with db.connect() as c:
         wid = c.execute(insert(db.watches).values(
-            token=token, route=w.route, depart=w.depart, target_price=w.target_price,
-            email=w.email, telegram_chat_id=w.telegram_chat_id).returning(db.watches.c.id)).scalar()
+            token=security.hash_token(token), route=w.route, depart=w.depart, target_price=w.target_price,
+            email=email, email_verified=bool(email) and not send_confirm).returning(db.watches.c.id)).scalar()
+    if send_confirm:
+        background.add_task(_send_confirmation, wid, email, w.route, w.depart)
     ingest.register_search(w.route)  # keep watched routes fresh
-    return {"id": wid, "token": token, **w.model_dump(mode="json")}
+    return {"id": wid, "token": token, "route": w.route, "depart": w.depart.isoformat(),
+            "target_price": w.target_price, "email_confirmation_sent": send_confirm,
+            "telegram_link": _telegram_link(wid) if w.telegram else None}
+
+
+def _page(title: str, message: str, status: int = 200) -> HTMLResponse:
+    import html
+    return HTMLResponse(status_code=status, content=(
+        f'<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'<title>{html.escape(title)} · Skyward</title><link rel="stylesheet" href="/static/styles.css">'
+        f'<body><main class="notice"><p class="eyebrow">Skyward</p><h1>{html.escape(title)}</h1>'
+        f'<p>{html.escape(message)}</p><a class="btn gold" href="/">Back to Skyward</a></main></body>'))
+
+
+@app.get("/api/watches/confirm", response_class=HTMLResponse)
+def confirm_watch(w: int, s: str):
+    if not security.verify("confirm", w, s):
+        return _page("Link not valid", "This confirmation link is invalid or has been changed.", 400)
+    with db.connect() as c:
+        row = c.execute(select(db.watches.c.email).where(db.watches.c.id == w)).first()
+        if row is None:
+            return _page("Alert not found", "This alert was removed or the trip has already departed.", 404)
+        # confirming one alert verifies the address for all of that person's alerts
+        c.execute(update(db.watches).where(db.watches.c.email == row.email).values(email_verified=True))
+    return _page("Alert confirmed", "You'll get an email only when the real price drops: at most once a day per trip.")
+
+
+@app.get("/api/watches/unsubscribe", response_class=HTMLResponse)
+def unsubscribe_page(w: int, s: str):
+    if not security.verify("unsub", w, s):
+        return _page("Link not valid", "This unsubscribe link is invalid.", 400)
+    with db.connect() as c:
+        c.execute(delete(db.watches).where(db.watches.c.id == w))
+    return _page("Alert stopped", "You won't receive any more messages for this alert.")
+
+
+@app.post("/api/watches/unsubscribe")
+def unsubscribe_one_click(w: int, s: str):
+    """RFC 8058 one-click unsubscribe (Gmail/Outlook 'Unsubscribe' button)."""
+    if not security.verify("unsub", w, s):
+        raise HTTPException(400, "Invalid link")
+    with db.connect() as c:
+        c.execute(delete(db.watches).where(db.watches.c.id == w))
+    return {"ok": True}
+
+
+@app.post("/api/telegram/webhook")
+async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: str | None = Header(default=None)):
+    """Messages to the Skyward bot. '/start w<id>_<sig>' links a chat to an alert; '/stop' removes it."""
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not token or not x_telegram_bot_api_secret_token or not hmac.compare_digest(
+            x_telegram_bot_api_secret_token, security.telegram_secret(token)):
+        raise HTTPException(403, "Forbidden")
+    update_ = await request.json()
+    msg = update_.get("message") or {}
+    chat_id = str((msg.get("chat") or {}).get("id") or "")
+    text = (msg.get("text") or "").strip()
+    if not chat_id or not re.fullmatch(r"-?\d{1,20}", chat_id):
+        return {"ok": True}
+    m = re.fullmatch(r"/start w(\d{1,10})_([0-9a-f]{32})", text)
+    if m and security.verify("tg", int(m[1]), m[2]):
+        with db.connect() as c:
+            row = c.execute(select(db.watches.c.route, db.watches.c.depart).where(db.watches.c.id == int(m[1]))).first()
+            if row:
+                c.execute(update(db.watches).where(db.watches.c.id == int(m[1])).values(telegram_chat_id=chat_id))
+        reply = (f"✅ Connected. I'll message you when {row.route[:3]} → {row.route[4:]} on {row.depart:%d %b %Y} "
+                 f"gets cheaper (at most once a day). Send /stop to stop all alerts." if row
+                 else "That alert no longer exists.")
+    elif text == "/stop":
+        with db.connect() as c:
+            c.execute(update(db.watches).where(db.watches.c.telegram_chat_id == chat_id).values(telegram_chat_id=None))
+        reply = "🛑 Done. You won't get any more Skyward alerts here."
+    else:
+        reply = "Hi! Set a price alert on Skyward and tap 'Connect Telegram' to link it here. Send /stop to stop alerts."
+    await asyncio.to_thread(notify.send_telegram, chat_id, reply)
+    return {"ok": True}
+
+
+@app.get("/api/alerts/config")
+def alerts_config():
+    """Which alert channels are switched on (so the page only offers what works)."""
+    return {"email": notify.email_enabled(), "telegram": notify.telegram_enabled()}
 
 
 @app.get("/api/watches")
 def list_watches(tokens: str = ""):
     """Watches for the given comma-separated manage tokens (the browser keeps them)."""
-    toks = [t for t in tokens.split(",") if t][:50]
+    toks = [t for t in tokens.split(",") if 10 <= len(t) <= 64][:50]
     if not toks:
         return []
     with db.connect() as c:
-        ws = db.rows(c.execute(select(db.watches).where(db.watches.c.token.in_(toks)).order_by(db.watches.c.id.desc())))
+        ws = db.rows(c.execute(select(db.watches).where(_token_filter(toks)).order_by(db.watches.c.id.desc())))
         ids = [w["id"] for w in ws]
         al = db.rows(c.execute(select(db.alerts).where(db.alerts.c.watch_id.in_(ids))
                                .order_by(db.alerts.c.id.desc()).limit(50))) if ids else []
@@ -568,8 +770,10 @@ def list_watches(tokens: str = ""):
 
 @app.delete("/api/watches/{token}", status_code=204)
 def delete_watch(token: str):
+    if not 10 <= len(token) <= 64:
+        raise HTTPException(400, "Invalid token")
     with db.connect() as c:
-        c.execute(delete(db.watches).where(db.watches.c.token == token))
+        c.execute(delete(db.watches).where(_token_filter([token])))
 
 
 @app.post("/api/watches/check")
@@ -592,14 +796,6 @@ async def refresh():
 def reload_model(x_admin_token: str | None = Header(default=None)):
     _require_admin(x_admin_token)
     return {"changed": _load_latest_model(), "model_id": STATE["model_id"]}
-
-
-@app.middleware("http")
-async def security_headers(request: Request, call_next):
-    resp = await call_next(request)
-    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
-    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-    return resp
 
 
 if os.path.isdir(FRONTEND):

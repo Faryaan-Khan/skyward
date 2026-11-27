@@ -22,6 +22,49 @@ def enabled() -> bool:
     return bool(os.getenv("TRAVELPAYOUTS_TOKEN"))
 
 
+DIRECTIONS = "https://api.travelpayouts.com/v1/city-directions"
+AIRPORTS = "https://api.travelpayouts.com/data/en/airports.json"
+CITIES = "https://api.travelpayouts.com/data/en/cities.json"
+
+
+def popular_directions(origin: str, client: httpx.Client | None = None) -> list[str]:
+    """Most popular destinations from `origin` among Aviasales searches worldwide (best first)."""
+    token = os.getenv("TRAVELPAYOUTS_TOKEN")
+    if not token:
+        return []
+    own = client is None
+    client = client or httpx.Client(timeout=20)
+    try:
+        r = client.get(DIRECTIONS, params={"origin": origin, "currency": "usd"}, headers={"X-Access-Token": token})
+        r.raise_for_status()
+        data = r.json().get("data") or {}
+    finally:
+        if own:
+            client.close()
+    return [code for code in data if isinstance(code, str) and len(code) == 3 and code != origin]
+
+
+def airports(client: httpx.Client | None = None) -> list[dict]:
+    """Every flightable airport in the world with city name and coordinates (public data, no token)."""
+    own = client is None
+    client = client or httpx.Client(timeout=60)
+    try:
+        aps = client.get(AIRPORTS).json()
+        cities = {c["code"]: c.get("name") for c in client.get(CITIES).json() if c.get("code")}
+    finally:
+        if own:
+            client.close()
+    out = []
+    for a in aps:
+        co = a.get("coordinates") or {}
+        if not (a.get("flightable") and a.get("iata_type") == "airport" and co.get("lat") is not None):
+            continue
+        out.append({"code": a["code"], "name": a.get("name") or a["code"], "city_code": a.get("city_code"),
+                    "city": cities.get(a.get("city_code")) or a.get("name"), "country": a.get("country_code"),
+                    "lat": round(float(co["lat"]), 4), "lon": round(float(co["lon"]), 4)})
+    return out
+
+
 def autocomplete(term: str, locale: str = "en", client: httpx.Client | None = None) -> list[dict]:
     """Cities and airports worldwide matching `term` (free endpoint, no token needed)."""
     own = client is None

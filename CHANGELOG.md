@@ -2,6 +2,27 @@
 
 All notable changes to Skyward. Versions follow [semantic versioning](https://semver.org).
 
+## [2.1.0] - 2026-11-28
+
+### Added
+- Realistic interactive 3D earth (NASA imagery, night lights in dark mode): drag to spin, scroll/pinch to
+  zoom, tap any of ~3,700 airports to set it as origin or destination.
+- Weekly "Popular this week" routes: Skyward users' searches in the last 7 days combined with worldwide
+  demand from 15 global hubs.
+- More places to book: Trip.com, Booking.com and Cheapflights, plus the operating airline's own site.
+- Real price alerts by email (double opt-in) and Telegram (one-tap connect), with anti-spam rules:
+  real prices only, at most one per trip per day, a further 5% drop needed to repeat, 8 per trip max,
+  5 emails per address per day, one-click unsubscribe in every message.
+- Security: Content-Security-Policy, HSTS and other headers, per-visitor rate limits on all API routes,
+  request size cap, hashed manage tokens, signed links, Subresource Integrity, CodeQL, pip-audit, Dependabot.
+
+### Changed
+- Softer, low-glare day palette; smoother day/night switch (no competing animations, charts recoloured in place).
+- Every real fare figure (cheapest price, fares table, deals) links to that exact offer; predictions stay in-app.
+- Deals sorted by biggest saving, showing the amount saved.
+- Airline names instead of codes.
+- The developer API page is no longer linked or public.
+
 ## [2.0.0] - 2026-11-28
 
 ### Added

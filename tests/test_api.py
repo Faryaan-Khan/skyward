@@ -57,7 +57,8 @@ def test_end_to_end():
         assert c.get("/api/forecast/XXX-YYY?depart=" + depart).status_code == 404
         assert c.get("/api/forecast/not-a-route?depart=" + depart).status_code == 400
         assert len(c.get("/api/history/KUL-SIN").json()) > 50
-        assert c.get("/api/health").json()["version"] == "2.0.0"
+        from app import __version__
+        assert c.get("/api/health").json()["version"] == __version__
 
 
 def test_live_ingest_and_endpoints():
@@ -85,27 +86,105 @@ def test_live_ingest_and_endpoints():
         assert c.post("/api/admin/reload-model", headers={"X-Admin-Token": "test-admin"}).json()["changed"]
 
 
-def test_watches_are_private_and_alerts_fire():
+def test_alerts_double_opt_in_no_spam_and_unsubscribe(monkeypatch):
+    from app import notify, security
+    sent = []
+    monkeypatch.setattr(notify, "email_enabled", lambda: True)
+    monkeypatch.setattr(notify, "send_email", lambda to, subject, *a, **k: sent.append((to, subject)) or True)
+    nxt = (TODAY.replace(day=1) + dt.timedelta(days=32)).replace(day=20)
+    admin = {"X-Admin-Token": "test-admin"}
     with TestClient(app) as c:
-        depart = (TODAY + dt.timedelta(days=60)).isoformat()
-        w = c.post("/api/watches", json={"route": "KUL-SIN", "depart": depart, "target_price": 9999,
-                                         "email": "someone@example.com"}).json()
-        assert w["token"]
-        # nobody can list watches without the token, and emails are never returned
+        ingest.fetch_route_month("KUL-SIN", nxt.strftime("%Y-%m"), fetcher=fake_fetch)   # live fare: 42 USD
+        w = c.post("/api/watches", json={"route": "KUL-SIN", "depart": nxt.isoformat(), "target_price": 9999,
+                                         "email": "Someone@Example.com"}).json()
+        assert w["token"] and w["email_confirmation_sent"]
+        assert sent[-1][0] == "someone@example.com" and "Confirm" in sent[-1][1]
+        # watches are private: no token, no list; emails are never returned
         assert c.get("/api/watches").json() == []
-        mine = c.get(f"/api/watches?tokens={w['token']}").json()
-        assert mine["watches"][0]["has_email"] and "email" not in mine["watches"][0]
+        mine = c.get(f"/api/watches?tokens={w['token']}").json()["watches"][0]
+        assert mine["has_email"] and not mine["email_verified"] and "email" not in mine
+        # tokens are stored hashed
+        with db.connect() as conn:
+            stored = conn.execute(db.watches.select().where(db.watches.c.id == w["id"])).first().token
+        assert stored == security.hash_token(w["token"])
 
+        # no alert before the address is confirmed
         assert c.post("/api/watches/check").status_code == 403
-        fired = c.post("/api/watches/check", headers={"X-Admin-Token": "test-admin"}).json()
-        assert any(x["watch_id"] == w["id"] for x in fired)
-        # cooldown: the same watch is not alerted twice in a row
-        fired2 = c.post("/api/watches/check", headers={"X-Admin-Token": "test-admin"}).json()
-        assert not any(x["watch_id"] == w["id"] for x in fired2)
+        assert not c.post("/api/watches/check", headers=admin).json()
+        # forged confirm link is rejected; the real one works
+        assert c.get(f"/api/watches/confirm?w={w['id']}&s=bad").status_code == 400
+        assert c.get(f"/api/watches/confirm?w={w['id']}&s={security.sign('confirm', w['id'])}").status_code == 200
+
+        fired = c.post("/api/watches/check", headers=admin).json()
+        assert [x["watch_id"] for x in fired] == [w["id"]] and fired[0]["kind"] == "target"
+        assert "42 USD" in sent[-1][1]
+        # no spam: the same watch isn't alerted again (cooldown + needs a further price fall)
+        assert not c.post("/api/watches/check", headers=admin).json()
         assert c.get(f"/api/watches?tokens={w['token']}").json()["alerts"]
 
-        assert c.delete(f"/api/watches/{w['token']}").status_code == 204
+        # a second alert for a confirmed address needs no new confirmation email
+        before = len(sent)
+        w2 = c.post("/api/watches", json={"route": "KUL-SIN", "depart": nxt.isoformat(),
+                                          "email": "someone@example.com"}).json()
+        assert not w2["email_confirmation_sent"] and len(sent) == before
+
+        # bad input is rejected
+        assert c.post("/api/watches", json={"route": "KUL-SIN", "depart": nxt.isoformat(), "email": "not-an-email"}).status_code == 422
+        assert c.post("/api/watches", json={"route": "KUL-SIN", "depart": nxt.isoformat()}).status_code == 400
+
+        # unsubscribe link (from the email) removes the alert; forged links don't
+        assert c.get(f"/api/watches/unsubscribe?w={w['id']}&s=nope").status_code == 400
+        assert c.get(f"/api/watches/unsubscribe?w={w['id']}&s={security.sign('unsub', w['id'])}").status_code == 200
         assert c.get(f"/api/watches?tokens={w['token']}").json()["watches"] == []
+        assert c.delete(f"/api/watches/{w2['token']}").status_code == 204
+
+
+def test_telegram_connect_and_webhook_security(monkeypatch):
+    from app import notify, security
+    replies = []
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:test")
+    monkeypatch.setattr(notify, "bot_username", lambda: "SkywardTestBot")
+    monkeypatch.setattr(notify, "send_telegram", lambda chat, text, buttons=None: replies.append((chat, text)) or True)
+    depart = (TODAY + dt.timedelta(days=40)).isoformat()
+    with TestClient(app) as c:
+        w = c.post("/api/watches", json={"route": "KUL-SIN", "depart": depart, "telegram": True}).json()
+        assert w["telegram_link"].startswith("https://t.me/SkywardTestBot?start=w")
+        payload = w["telegram_link"].split("start=")[1]
+        upd = {"message": {"chat": {"id": 555}, "text": f"/start {payload}"}}
+        # calls without Telegram's secret header are refused
+        assert c.post("/api/telegram/webhook", json=upd).status_code == 403
+        hdr = {"X-Telegram-Bot-Api-Secret-Token": security.telegram_secret("123:test")}
+        assert c.post("/api/telegram/webhook", json=upd, headers=hdr).status_code == 200
+        assert "Connected" in replies[-1][1]
+        assert c.get(f"/api/watches?tokens={w['token']}").json()["watches"][0]["has_telegram"]
+        # a forged start payload doesn't link anything
+        c.post("/api/telegram/webhook", json={"message": {"chat": {"id": 777}, "text": f"/start w{w['id']}_{'0' * 32}"}}, headers=hdr)
+        assert "Hi!" in replies[-1][1]
+        c.post("/api/telegram/webhook", json={"message": {"chat": {"id": 555}, "text": "/stop"}}, headers=hdr)
+        assert not c.get(f"/api/watches?tokens={w['token']}").json()["watches"][0]["has_telegram"]
+
+
+def test_security_headers_rate_limit_and_body_cap():
+    with TestClient(app) as c:
+        r = c.get("/")
+        assert "frame-ancestors 'none'" in r.headers["content-security-policy"]
+        assert r.headers["x-frame-options"] == "DENY" and "max-age" in r.headers["strict-transport-security"]
+        assert c.get("/docs").status_code == 404             # developer docs are off on the public site
+        big = "x" * 20000
+        assert c.post("/api/watches", content=big, headers={"content-type": "application/json"}).status_code == 413
+
+
+def test_weekly_popular_routes():
+    with TestClient(app) as c:
+        for _ in range(5):
+            ingest.register_search("KUL-CDG")
+        rows = ingest.compute_popular(directions=lambda hub, client=None: ["LON", "PAR"] if hub == "KUL" else [])
+        codes = [r["code"] for r in rows]
+        assert codes[0] == "KUL-CDG"           # 5 searches x2 = 10 beats the #1 worldwide route (8)
+        assert "KUL-LON" in codes and "KUL-PAR" in codes
+        api = c.get("/api/routes").json()
+        assert api[0]["code"] == "KUL-CDG" and "searches" in api[0]["reason"]
+        assert "KUL-LON" in ingest.tracked_routes()
 
 
 def test_worldwide_search_any_route(monkeypatch):

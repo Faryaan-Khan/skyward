@@ -118,24 +118,72 @@ def _meta_values(route: str) -> dict:
             "dest_lat": pd_.get("lat"), "dest_lon": pd_.get("lon")}
 
 
-def register_search(route: str) -> None:
-    """Count a search for a route (creating it with names and coordinates the first time)."""
-    now = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
+def _utcnow() -> dt.datetime:
+    return dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
+
+
+def ensure_route(route: str) -> None:
+    """Create a route row with names and coordinates if it doesn't exist yet."""
     r = db.routes.c
     with db.connect() as c:
         row = c.execute(select(r.code, r.origin_name).where(r.code == route)).first()
     if row is None:
-        values = {"code": route, "searches": 1, "last_searched": now, "featured": False, **_meta_values(route)}
         try:
             with db.connect() as c:
-                c.execute(insert(db.routes), values)
-            return
+                c.execute(insert(db.routes), {"code": route, "searches": 0, "featured": False, **_meta_values(route)})
         except Exception:
-            pass  # created concurrently by another request: fall through to the update
+            pass  # created concurrently by another request
+    elif not row.origin_name:
+        fill_route_meta([route])
+
+
+def register_search(route: str) -> None:
+    """Count a search for a route (creating it the first time) and log it for weekly popularity."""
+    ensure_route(route)
+    now = _utcnow()
+    r = db.routes.c
     with db.connect() as c:
         c.execute(update(db.routes).where(r.code == route).values(searches=r.searches + 1, last_searched=now))
-    if row is not None and not row.origin_name:
-        fill_route_meta([route])
+        c.execute(insert(db.search_events), {"route": route, "at": now})
+
+
+# ---- weekly popular routes: what Skyward users search + what the world flies ----
+HUBS = ["KUL", "SIN", "BKK", "HKG", "TYO", "SEL", "DXB", "LON", "PAR", "NYC", "LAX", "SYD", "IST", "DEL", "JKT"]
+POPULAR_SIZE = 12
+
+
+def compute_popular(directions=None) -> list[dict]:
+    """Rank routes for the coming week. Score = 2 x Skyward searches in the last 7 days
+    + worldwide popularity (top destinations from 15 global hubs, by Aviasales search volume)."""
+    directions = directions or travelpayouts.popular_directions
+    now = _utcnow()
+    with db.connect() as c:
+        users = dict(c.execute(select(db.search_events.c.route, func.count())
+                               .where(db.search_events.c.at >= now - dt.timedelta(days=7))
+                               .group_by(db.search_events.c.route)).all())
+        c.execute(delete(db.search_events).where(db.search_events.c.at < now - dt.timedelta(days=30)))
+    worldwide: dict[str, float] = {}
+    with httpx.Client(timeout=20) as client:
+        for hub in HUBS:
+            try:
+                dests = directions(hub, client=client)[:8]
+            except Exception as e:
+                log.warning("popular directions failed for %s: %s", hub, e)
+                continue
+            for i, dest in enumerate(dests):
+                worldwide[f"{hub}-{dest}"] = 8 - i
+    scores = {code: 2 * users.get(code, 0) + worldwide.get(code, 0) for code in set(users) | set(worldwide)}
+    top = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))[:POPULAR_SIZE]
+    rows = [{"code": code, "rank": i + 1, "score": float(s), "user_searches": int(users.get(code, 0)),
+             "worldwide": code in worldwide, "updated": now} for i, (code, s) in enumerate(top) if s > 0]
+    with db.connect() as c:
+        c.execute(delete(db.popular))
+        if rows:
+            c.execute(insert(db.popular), rows)
+    for row in rows:
+        ensure_route(row["code"])
+    log.info("popular routes updated: %s", [r["code"] for r in rows])
+    return rows
 
 
 def seed_featured_routes() -> None:
@@ -169,6 +217,8 @@ def tracked_routes() -> dict[str, int]:
     out = {r: MONTHS_AHEAD for r in ROUTES}
     cutoff = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None) - dt.timedelta(days=14)
     with db.connect() as c:
+        for (code,) in c.execute(select(db.popular.c.code).order_by(db.popular.c.rank)):
+            out.setdefault(code, SEARCHED_MONTHS_AHEAD)
         for (code,) in c.execute(select(db.routes.c.code).where(db.routes.c.last_searched >= cutoff)
                                  .order_by(db.routes.c.searches.desc()).limit(MAX_SEARCHED_ROUTES)):
             out.setdefault(code, SEARCHED_MONTHS_AHEAD)
@@ -228,45 +278,117 @@ def retrain() -> FareForecaster:
     return model
 
 
-def check_watches(model: FareForecaster, today: dt.date | None = None) -> list[dict]:
-    """Evaluate every watch; alert at most once per cooldown window per watch."""
+# ---- price alerts: real prices only, opted-in channels only, no spam ----
+MAX_ALERTS_PER_WATCH = 8          # a watch goes quiet after this many alerts
+MAX_EMAILS_PER_ADDRESS_PER_DAY = 5
+DEAL_THRESHOLD = 0.90             # without a target, alert only when a fare is >= 10% under typical
+REPEAT_DROP = 0.95                # a repeat alert needs a further >= 5% fall vs the last alert
+
+
+def _alert_text(w: dict, price: float, adv: dict, kind: str, link: str | None) -> tuple[str, str, str]:
+    route = f"{w['route'][:3]} → {w['route'][4:]}"
+    why = (f"It's at or below your target of {w['target_price']:.0f} USD." if kind == "target"
+           else f"That's {100 * (1 - price / adv['typical_price']):.0f}% below the usual price for this route.")
+    subject = f"✈ {route} on {w['depart']:%d %b}: now {price:.0f} USD"
+    text = (f"{route} on {w['depart']:%a %d %b %Y} is now {price:.0f} USD. {why} "
+            f"Model call: {adv['action']}. {adv['reason']}")
+    return subject, text, link or f"{notify.public_url()}/?from={w['route'][:3]}&to={w['route'][4:]}&month={w['depart']:%Y-%m}"
+
+
+def deliver_alert(w: dict, price: float, adv: dict, kind: str, link: str | None) -> list[str]:
+    """Send one alert on every channel the user confirmed. Returns the channels used."""
+    from . import security
+    subject, text, book = _alert_text(w, price, adv, kind, link)
+    unsub = f"{notify.public_url()}/api/watches/unsubscribe?w={w['id']}&s={security.sign('unsub', w['id'])}"
+    sent = []
+    if w.get("email") and w.get("email_verified"):
+        esc = html_escape
+        body = notify.email_html(subject, [esc(text)], ("View & book this flight", book),
+                                 f'You get this because you set a price alert on Skyward. '
+                                 f'<a href="{esc(unsub)}" style="color:#8c6d3a">Stop these alerts</a>.')
+        if notify.send_email(w["email"], subject, f"{text}\n\nBook: {book}\n\nStop these alerts: {unsub}", body, unsub):
+            sent.append("email")
+    if w.get("telegram_chat_id"):
+        if notify.send_telegram(w["telegram_chat_id"], f"<b>{html_escape(subject)}</b>\n{html_escape(text)}",
+                                [("View & book", book), ("Stop this alert", unsub)]):
+            sent.append("telegram")
+    return sent
+
+
+def check_watches(model: FareForecaster, today: dt.date | None = None, deliver=None) -> list[dict]:
+    """Evaluate every watch against the latest REAL price and alert without spamming:
+    * only channels the user confirmed (verified email / connected Telegram)
+    * at most one alert per watch per 24 h, and at most 8 per watch overall
+    * a repeat alert needs the price to fall at least 5% further than the last alert
+    * at most 5 emails per address per day across all their watches
+    """
+    deliver = deliver or deliver_alert
     today = today or dt.date.today()
-    # naive UTC works for both SQLite (CURRENT_TIMESTAMP is UTC) and Postgres (UTC session)
-    cutoff = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None) - dt.timedelta(hours=ALERT_COOLDOWN_HOURS)
+    now = _utcnow()
+    cooldown = now - dt.timedelta(hours=ALERT_COOLDOWN_HOURS)
     fired = []
+    W = db.watches.c
     with db.connect() as c:
-        recent = {r[0] for r in c.execute(
-            select(db.alerts.c.watch_id).where(db.alerts.c.created >= cutoff).distinct())}
-        for w in db.rows(c.execute(select(db.watches).where(db.watches.c.depart > today))):
-            if w["id"] in recent:
-                continue
-            live = latest_live_price(c, w["route"], w["depart"])
-            try:
-                adv = model.advise(w["route"], w["depart"], live, today=today)
-            except ValueError:  # no price data for this route yet
-                continue
-            hit_target = bool(w["target_price"]) and adv["current_price"] <= w["target_price"]
-            if adv["action"] == "BUY" or hit_target:
-                kind = "target" if hit_target else "buy_now"
-                msg = (f"{w['route']} on {w['depart']}: {adv['current_price']:.0f} now. "
-                       f"Expected low {adv['expected_low']:.0f}. {adv['reason']}")
-                try:
-                    notify.dispatch(w, f"Skyward: time to book {w['route']}", msg)
-                except Exception as e:
-                    log.warning("notify failed for watch %s: %s", w["id"], e)
-                c.execute(insert(db.alerts), {"watch_id": w["id"], "kind": kind, "message": msg})
-                fired.append({"watch_id": w["id"], "kind": kind, "message": msg})
+        c.execute(delete(db.watches).where(W.depart <= today))  # trips in the past: clean up
+        sent_today: dict[str, int] = dict(c.execute(
+            select(W.email, func.count()).select_from(db.alerts.join(db.watches, db.alerts.c.watch_id == W.id))
+            .where(and_(db.alerts.c.created >= now - dt.timedelta(days=1), W.email.is_not(None)))
+            .group_by(W.email)).all())
+        watches = db.rows(c.execute(select(db.watches)))
+    for w in watches:
+        if not ((w["email"] and w["email_verified"]) or w["telegram_chat_id"]):
+            continue
+        if w["alert_count"] >= MAX_ALERTS_PER_WATCH or (w["last_alert_at"] and w["last_alert_at"] > cooldown):
+            continue
+        with db.connect() as c:
+            fare = latest_live_fare(c, w["route"], w["depart"])
+        if not fare:
+            continue  # never alert on a model guess, only on a price you can actually buy
+        price = fare["price"]
+        try:
+            adv = model.advise(w["route"], w["depart"], price, today=today)
+        except ValueError:
+            continue
+        if w["last_alert_price"] and price > w["last_alert_price"] * REPEAT_DROP:
+            continue
+        if w["target_price"] and price <= w["target_price"]:
+            kind = "target"
+        elif not w["target_price"] and price <= adv["typical_price"] * DEAL_THRESHOLD and adv["action"] == "BUY":
+            kind = "deal"
+        else:
+            continue
+        if w["email"] and sent_today.get(w["email"], 0) >= MAX_EMAILS_PER_ADDRESS_PER_DAY:
+            continue
+        channels = deliver(w, price, adv, kind, fare.get("link"))
+        subject, text, _ = _alert_text(w, price, adv, kind, fare.get("link"))
+        with db.connect() as c:
+            c.execute(insert(db.alerts), {"watch_id": w["id"], "kind": kind, "message": text[:1000]})
+            c.execute(update(db.watches).where(W.id == w["id"]).values(
+                last_alert_price=price, last_alert_at=now, alert_count=W.alert_count + 1))
+        if w["email"]:
+            sent_today[w["email"]] = sent_today.get(w["email"], 0) + 1
+        fired.append({"watch_id": w["id"], "kind": kind, "message": text, "channels": channels})
     return fired
 
 
-def latest_live_price(conn, route: str, depart: dt.date) -> float | None:
-    """Most recent real price seen for this exact trip, if any."""
+def html_escape(s: str) -> str:
+    import html
+    return html.escape(str(s), quote=True)
+
+
+def latest_live_fare(conn, route: str, depart: dt.date) -> dict | None:
+    """Most recent real fare for this exact trip (price + booking link), if any."""
+    f = db.fares.c
     r = conn.execute(
-        select(db.fares.c.price).where(and_(
-            db.fares.c.route == route, db.fares.c.depart == depart, db.fares.c.source != "synthetic"))
-        .order_by(db.fares.c.observed.desc()).limit(1)
+        select(f.price, f.link).where(and_(f.route == route, f.depart == depart, f.source != "synthetic"))
+        .order_by(f.observed.desc()).limit(1)
     ).first()
-    return float(r[0]) if r else None
+    return {"price": float(r.price), "link": r.link} if r else None
+
+
+def latest_live_price(conn, route: str, depart: dt.date) -> float | None:
+    fare = latest_live_fare(conn, route, depart)
+    return fare["price"] if fare else None
 
 
 def run_refresh(train: bool = True) -> dict:
@@ -277,6 +399,11 @@ def run_refresh(train: bool = True) -> dict:
         fill_route_meta()
     except Exception as e:
         log.warning("route meta lookup failed: %s", e)
+    if travelpayouts.enabled() and db.try_acquire("popular", 7 * 86400 - 3600):  # weekly
+        try:
+            compute_popular()
+        except Exception as e:
+            log.warning("popular routes update failed: %s", e)
     if travelpayouts.enabled():
         saved = fetch_live()
         out["fetched"] = sum(saved.values())

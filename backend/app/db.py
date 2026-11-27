@@ -12,7 +12,7 @@ from contextlib import contextmanager
 
 from sqlalchemy import (
     Boolean, Column, Date, DateTime, Float, Index, Integer, LargeBinary, MetaData, String, Table,
-    create_engine, func, insert, or_, select, update,
+    create_engine, func, insert, inspect, or_, select, text, update,
 )
 from sqlalchemy.exc import IntegrityError
 
@@ -60,6 +60,11 @@ watches = Table(
     Column("email", String(255)),
     Column("telegram_chat_id", String(64)),
     Column("created", DateTime(timezone=True), server_default=func.now()),
+    # v2.1: double opt-in for email + anti-spam bookkeeping
+    Column("email_verified", Boolean, nullable=False, server_default="0"),
+    Column("last_alert_price", Float),
+    Column("last_alert_at", DateTime),                   # naive UTC
+    Column("alert_count", Integer, nullable=False, server_default="0"),
 )
 
 alerts = Table(
@@ -92,6 +97,23 @@ routes = Table(
     Column("searches", Integer, nullable=False, default=0),
     Column("last_searched", DateTime),                   # naive UTC
     Column("featured", Boolean, nullable=False, default=False),
+)
+
+search_events = Table(  # one row per search, for weekly popularity (pruned after 30 days)
+    "search_events", metadata,
+    Column("id", Integer, primary_key=True),
+    Column("route", String(16), nullable=False),
+    Column("at", DateTime, nullable=False, index=True),  # naive UTC
+)
+
+popular = Table(  # recomputed weekly: Skyward users' searches + worldwide demand
+    "popular", metadata,
+    Column("code", String(16), primary_key=True),
+    Column("rank", Integer, nullable=False),
+    Column("score", Float, nullable=False),
+    Column("user_searches", Integer, nullable=False, default=0),
+    Column("worldwide", Boolean, nullable=False, default=False),
+    Column("updated", DateTime, nullable=False),
 )
 
 job_lock = Table(
@@ -139,6 +161,7 @@ def init(seed_if_empty: bool = True) -> None:
     from .synthetic import generate
 
     metadata.create_all(engine())
+    migrate()
     with connect() as c:
         if seed_if_empty and c.execute(select(func.count()).select_from(fares)).scalar() == 0:
             batch = [
@@ -147,6 +170,28 @@ def init(seed_if_empty: bool = True) -> None:
             ]
             for i in range(0, len(batch), 5000):
                 c.execute(insert(fares), batch[i:i + 5000])
+
+
+def migrate() -> None:
+    """Add columns introduced after a table was first created (create_all never alters tables)."""
+    insp = inspect(engine())
+    with connect() as c:
+        for table in metadata.sorted_tables:
+            if not insp.has_table(table.name):
+                continue
+            have = {col["name"] for col in insp.get_columns(table.name)}
+            for col in table.columns:
+                if col.name in have:
+                    continue
+                ddl = f'ALTER TABLE {table.name} ADD COLUMN {col.name} {col.type.compile(engine().dialect)}'
+                if col.server_default is not None:
+                    default = col.server_default.arg
+                    if isinstance(col.type, Boolean):  # Postgres wants TRUE/FALSE, SQLite accepts both
+                        default = "TRUE" if str(default) in ("1", "true") else "FALSE"
+                    ddl += f" DEFAULT {default}"
+                    if not col.nullable:
+                        ddl += " NOT NULL"
+                c.execute(text(ddl))
 
 
 def try_acquire(name: str, min_interval_s: int) -> bool:
