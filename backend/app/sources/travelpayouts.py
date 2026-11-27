@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Faryaan Khan
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 """Travelpayouts / Aviasales Data API adapter (free with a Travelpayouts account).
 
 Returns the cheapest real fares found by Aviasales users in roughly the last 48 hours

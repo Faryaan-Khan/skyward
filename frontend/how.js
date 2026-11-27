@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Faryaan Khan
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 /* "How it works" page: theme toggle + start each animation when its card scrolls into view. */
 "use strict";
 (function () {

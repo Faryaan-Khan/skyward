@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Faryaan Khan
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 """Fare forecasting model that works for any route in the world.
 
 Instead of memorising each route, the model learns how a fare moves *relative to the

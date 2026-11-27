@@ -11,7 +11,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169e1?style=flat-square&logo=postgresql&logoColor=white)
 ![scikit-learn](https://img.shields.io/badge/scikit--learn-f7931e?style=flat-square&logo=scikitlearn&logoColor=white)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue?style=flat-square)](LICENSE)
 
 [**Open the live site →**](https://skyward-tv5y.onrender.com) &nbsp;·&nbsp; [Releases](https://github.com/Faryaan-Khan/skyward/releases) &nbsp;·&nbsp; [Security](SECURITY.md)
 
@@ -237,4 +237,14 @@ Releases follow [semantic versioning](https://semver.org) and are listed on the
 
 ## License
 
-MIT
+Copyright (c) 2026 Faryaan Khan.
+
+Skyward is **source-available** under the [PolyForm Noncommercial License 1.0.0](LICENSE). You're welcome
+to read the code, learn from it, and run or modify it for personal, educational or other non-commercial
+purposes, as long as you keep the copyright notice. **Commercial use is not permitted** without a separate
+written licence; open an issue if you're interested.
+
+Releases up to and including v2.2.0 were published under the MIT License, and those copies stay under MIT.
+
+Third-party data, imagery and libraries are credited in [NOTICE.md](NOTICE.md). The live site's
+[terms and privacy page](frontend/legal.html) explains affiliate links and what the price alerts store.

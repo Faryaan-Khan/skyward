@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Faryaan Khan
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 """Skyward API: worldwide flight search, live fares, ML forecasts, predicted drops and alerts.
 
 Scaling design

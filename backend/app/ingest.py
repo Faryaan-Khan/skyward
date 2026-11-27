@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Faryaan Khan
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 """Ingestion job: fetch live fares, retrain the model, send due alerts.
 
 Runs separately from the web app (GitHub Actions cron every 15 minutes), so the
