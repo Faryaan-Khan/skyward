@@ -1,0 +1,22 @@
+name: Deploy
+# Deploys to Render only after the CI tests pass on main, so broken code never goes live.
+# Needs the repository secret RENDER_DEPLOY_HOOK (Render → service → Settings → Deploy Hook).
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push') }}
+    steps:
+      - name: Trigger Render deploy
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then echo "RENDER_DEPLOY_HOOK secret is not set"; exit 1; fi
+          curl -fsS -X POST "$HOOK" > /dev/null
+          echo "Deploy triggered for ${{ github.event.workflow_run.head_sha || github.sha }}"

@@ -35,7 +35,7 @@ Skyward notifies you by email or Telegram when it's time.
 | Data | PostgreSQL (Neon) via SQLAlchemy, SQLite for local dev |
 | ML | scikit-learn `HistGradientBoostingRegressor`, pandas, NumPy |
 | Live prices | Travelpayouts / Aviasales Data API |
-| Hosting & automation | Render (auto-deploy from `main`), GitHub Actions (tests + 15-minute refresh) |
+| Hosting & automation | Render; GitHub Actions runs the tests on every push and deploys to Render only when they pass |
 
 ## Features
 
@@ -101,8 +101,8 @@ You need three free accounts. Keep tokens and passwords in the services' setting
 3. **Render** (website): sign up at render.com with GitHub, give Render's GitHub app access to the
    repo, then **New → Blueprint** → choose the repo. It reads `render.yaml`. When asked, paste
    `DATABASE_URL` (Neon), `TRAVELPAYOUTS_TOKEN` and optionally `TRAVELPAYOUTS_MARKER`. Deploy, then
-   copy your site URL (e.g. `https://skyward-xxxx.onrender.com`). Every push to `main` now redeploys
-   automatically.
+   copy your site URL (e.g. `https://skyward-xxxx.onrender.com`). For deploys after passing tests,
+   copy the service's **Deploy Hook** (Settings) into a GitHub secret named `RENDER_DEPLOY_HOOK`.
 4. **GitHub** (keeps it refreshing while nobody is visiting): in this repo, go to Settings → Secrets and
    variables → Actions → **Variables** and add `SITE_URL` = your Render URL. No secrets needed: the
    site fetches prices itself, and the workflow only wakes it every 15 minutes.
