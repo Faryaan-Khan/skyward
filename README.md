@@ -24,8 +24,8 @@ gradient-boosted model predicts what a fare will cost on every day between now a
 get a clear **BUY / WAIT** call, the expected lowest price and the best day to buy. Set a watch and
 Skyward notifies you by email or Telegram when it's time.
 
-> The live site runs on Render's free plan, so the first visit after a quiet spell can take up to a
-> minute to wake up.
+> The live site runs on Render's free plan. A [cron-job.org](https://cron-job.org) job pings it every
+> 10 minutes so it stays awake and keeps refreshing prices; GitHub Actions also pings it as a backup.
 
 ## Tech stack
 
