@@ -80,6 +80,20 @@ model_store = Table(
     Column("blob", LargeBinary, nullable=False),
 )
 
+routes = Table(
+    "routes", metadata,
+    Column("code", String(16), primary_key=True),        # e.g. "KUL-LHR"
+    Column("origin_name", String(128)),
+    Column("dest_name", String(128)),
+    Column("origin_country", String(64)),
+    Column("dest_country", String(64)),
+    Column("origin_lat", Float), Column("origin_lon", Float),
+    Column("dest_lat", Float), Column("dest_lon", Float),
+    Column("searches", Integer, nullable=False, default=0),
+    Column("last_searched", DateTime),                   # naive UTC
+    Column("featured", Boolean, nullable=False, default=False),
+)
+
 job_lock = Table(
     "job_lock", metadata,
     Column("name", String(32), primary_key=True),

@@ -19,10 +19,11 @@
 
 </div>
 
-Skyward pulls real fares every 15 minutes, learns how prices move, and tells you *when* to book. A
-gradient-boosted model predicts what a fare will cost on every day between now and departure, so you
-get a clear **BUY / WAIT** call, the expected lowest price and the best day to buy. Set a watch and
-Skyward notifies you by email or Telegram when it's time.
+Search flights between any two cities in the world, see live fares in your own currency, compare the
+big booking sites in one click, and let machine learning tell you *when* to book. A gradient-boosted
+model predicts what a fare will cost on every day between now and departure, so you get a clear
+**BUY / WAIT** call, the expected lowest price and the best day to buy, and a feed of fares it expects
+to **drop**. Set a watch and Skyward notifies you by email or Telegram when it's time.
 
 > The live site runs on Render's free plan. A [cron-job.org](https://cron-job.org) job pings it every
 > 10 minutes so it stays awake and keeps refreshing prices; GitHub Actions also pings it as a backup.
@@ -39,17 +40,23 @@ Skyward notifies you by email or Telegram when it's time.
 
 ## Features
 
-- **Live fares**: cheapest real fare per departure date for the next 6 months, refreshed every
-  15 minutes, with the change since yesterday and how it compares to the model's expected price.
-- **Fare forecasting**: learns route cost, monthly seasonality, day-of-week effects, holiday and
-  recurring-event demand (Chinese New Year, Hari Raya, Christmas, summer peak…) and the U-shaped
-  days-to-departure curve.
+- **Worldwide search**: type any city or airport (autocomplete covers every IATA code). The cheapest
+  real fare for each date of the month appears in seconds; routes people search are then refreshed
+  automatically every 15 minutes.
+- **Compare & book**: every date links straight to the same search on Aviasales, Google Flights,
+  Skyscanner, Kayak, Expedia and Momondo. Skyward never takes payments; you book on the airline's or
+  agency's own site.
+- **Any currency**: prices shown in 160+ currencies with daily exchange rates; your choice is remembered.
+- **Predicted price drops**: the model scans live fares and highlights the ones it expects to get
+  cheaper, by how much, and the best day to buy.
 - **Buy-or-wait advice**: sweeps every possible purchase day and reports the expected low, the best
   buy date and the model's error band (MAE on a held-out split).
-- **Deals & special offers**: real fares more than 15% under the model's expected price.
+- **Deals**: real fares more than 15% under the model's expected price for that route and date.
 - **Private price alerts**: each watch gets a secret manage token kept in the visitor's browser, so
   nobody can see anyone else's watches or email address. Alerts go out at most once a day per watch.
-- **Dashboard** that refreshes itself every minute, and a **REST API** with docs at `/docs`.
+- **Luxury dashboard**: dark charcoal and gold with an animated great-circle flight path on a globe,
+  plus a day mode (the sun/moon toggle morphs and the page cross-fades). Works on phones.
+- **REST API** with interactive docs at `/docs`.
 
 ## Architecture (built to scale)
 
@@ -141,11 +148,13 @@ cd backend; ..\.venv\Scripts\python -m pytest ../tests -q
 | Departure month, day of year (sin/cos) | Seasonal demand |
 | Day of week | Friday/Sunday departures cost more |
 | Event factor | Demand spikes around holidays and yearly events |
-| Route | Base cost per city pair |
+| Route base (log) | The route's typical (median) fare, so one model covers every route in the world |
 
-The target is log price, trained with scikit-learn's `HistGradientBoostingRegressor` on synthetic
-baseline history plus every live snapshot collected so far, so the model learns more about real prices
-the longer it runs. Flash-sale observations are excluded from training so the model learns the
+The target is the log of *price relative to the route's typical fare*, trained with scikit-learn's
+`HistGradientBoostingRegressor` on synthetic baseline history plus every live snapshot collected so far.
+Because the model learns movement relative to a route's own level, a brand-new route only needs one batch
+of live prices before it can be forecast. **Predicted drops** come from the same model: for each live fare
+it sweeps the remaining purchase days and reports the expected fall from today's level and the best day. Flash-sale observations are excluded from training so the model learns the
 normal market, which is what lets it spot deals as outliers.
 
 **Calibration.** The synthetic history provides the *shape* of prices (seasonality, holidays, booking
@@ -158,8 +167,12 @@ nearly every real fare as a "60% off" deal. With it, the model's error (MAE) dro
 
 | Method | Path | Description |
 | --- | --- | --- |
+| GET | `/api/search?origin=KUL&destination=LHR&month=2027-01` | Live fares for any city pair for one month, with model view per date |
+| GET | `/api/places?q=tokyo` | Worldwide city and airport autocomplete |
+| GET | `/api/drops` | Fares the model expects to fall, by how much and when to buy |
+| GET | `/api/rates` | USD exchange rates for 160+ currencies |
 | GET | `/api/status` | Live or demo mode, last refresh time, rows by source |
-| GET | `/api/routes` | Supported routes |
+| GET | `/api/routes` | Featured and most-searched routes |
 | GET | `/api/live/{route}` | Latest real fares per departure date, change vs yesterday |
 | GET | `/api/history/{route}` | Weekly low/average fare history |
 | GET | `/api/forecast/{route}?depart=YYYY-MM-DD&current_price=` | Buy/wait advice and price curve (uses the latest live fare if no price is given) |
@@ -183,19 +196,26 @@ backend/app/
   db.py          SQLAlchemy tables (Postgres in production, SQLite locally)
   synthetic.py   Baseline history generator (seasonality, events, booking curve)
   notify.py      Email and Telegram alerts
-  sources/       Live fare adapters (Travelpayouts)
-frontend/        Dashboard (vanilla JS + Chart.js)
+  sources/       Travelpayouts fares + place search, exchange rates
+frontend/        Dashboard (vanilla JS + Chart.js, SVG globe)
 tests/           API tests
 render.yaml      Render deployment blueprint
-.github/workflows/refresh.yml   15-minute price refresh
+.github/workflows/ci.yml        tests on every push
+.github/workflows/deploy.yml    deploy to Render after tests pass
+.github/workflows/refresh.yml   backup 15-minute wake-up
+CHANGELOG.md     release notes per version
 ```
+
+## Versions
+
+Releases follow [semantic versioning](https://semver.org) and are listed on the
+[Releases page](https://github.com/Faryaan-Khan/skyward/releases); see [CHANGELOG.md](CHANGELOG.md).
 
 ## Roadmap
 
-- More routes, chosen by what users watch most
+- Return trips and flexible-date search
 - Web push notifications
-- Per-route models with uncertainty intervals (quantile regression)
-- Multi-city and flexible-date search
+- Uncertainty bands on forecasts (quantile regression)
 
 ## License
 

@@ -15,10 +15,41 @@ import os
 import httpx
 
 BASE = "https://api.travelpayouts.com/aviasales/v3/prices_for_dates"
+PLACES = "https://autocomplete.travelpayouts.com/places2"
 
 
 def enabled() -> bool:
     return bool(os.getenv("TRAVELPAYOUTS_TOKEN"))
+
+
+def autocomplete(term: str, locale: str = "en", client: httpx.Client | None = None) -> list[dict]:
+    """Cities and airports worldwide matching `term` (free endpoint, no token needed)."""
+    own = client is None
+    client = client or httpx.Client(timeout=10)
+    try:
+        r = client.get(PLACES, params=[("term", term), ("locale", locale),
+                                       ("types[]", "city"), ("types[]", "airport")])
+        r.raise_for_status()
+        items = r.json()
+    finally:
+        if own:
+            client.close()
+    out = []
+    for p in items[:12]:
+        if not p.get("code"):
+            continue
+        coords = p.get("coordinates") or {}
+        out.append({
+            "code": p["code"],
+            "type": p.get("type"),
+            "name": p.get("name"),
+            "city": p.get("city_name") or p.get("name"),
+            "country": p.get("country_name"),
+            "country_code": p.get("country_code"),
+            "lat": coords.get("lat"),
+            "lon": coords.get("lon"),
+        })
+    return out
 
 
 def fetch_month(origin: str, dest: str, month: str, currency: str = "usd",
