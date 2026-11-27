@@ -183,8 +183,9 @@ def compute_popular(directions=None) -> list[dict]:
         if code not in users and (per_dest.get(d, 0) >= 1 or per_origin.get(o, 0) >= 2):
             continue
         top.append((code, s))
-        per_dest[d] = per_dest.get(d, 0) + 1
-        per_origin[o] = per_origin.get(o, 0) + 1
+        if code not in users:   # users' searches don't use up the variety allowance
+            per_dest[d] = per_dest.get(d, 0) + 1
+            per_origin[o] = per_origin.get(o, 0) + 1
         if len(top) == POPULAR_SIZE:
             break
     rows = [{"code": code, "rank": i + 1, "score": float(s), "user_searches": int(users.get(code, 0)),
