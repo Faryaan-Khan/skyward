@@ -87,6 +87,20 @@ def test_refresh_lock_runs_once_per_interval():
         assert db.try_acquire("unit-test-job", 0) is True       # interval elapsed -> allowed
 
 
+def test_synthetic_is_calibrated_to_live_prices():
+    import pandas as pd
+    obs = TODAY
+    rows = [{"route": "A-B", "observed": obs, "depart": obs + dt.timedelta(days=30), "price": 400.0,
+             "is_sale": False, "source": "synthetic"} for _ in range(20)]
+    rows += [{"route": "A-B", "observed": obs, "depart": obs + dt.timedelta(days=30), "price": 100.0,
+              "is_sale": False, "source": "travelpayouts"} for _ in range(20)]
+    rows += [{"route": "C-D", "observed": obs, "depart": obs + dt.timedelta(days=30), "price": 400.0,
+              "is_sale": False, "source": "synthetic"} for _ in range(20)]
+    out = ingest.calibrate_synthetic(pd.DataFrame(rows))
+    assert set(out.loc[out.route == "A-B", "price"]) == {100.0}   # scaled down to the real level
+    assert set(out.loc[out.route == "C-D", "price"]) == {400.0}   # no live data -> untouched
+
+
 def test_db_url_normalisation(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgres://u:p@host/db?sslmode=require")
     assert db._url() == "postgresql+psycopg://u:p@host/db?sslmode=require"

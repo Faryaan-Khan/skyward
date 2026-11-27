@@ -82,9 +82,32 @@ def fetch_live(today: dt.date | None = None, fetcher=travelpayouts.fetch_month) 
 def load_training_frame() -> pd.DataFrame:
     with db.connect() as c:
         df = pd.DataFrame(db.rows(c.execute(
-            select(db.fares.c.route, db.fares.c.observed, db.fares.c.depart, db.fares.c.price, db.fares.c.is_sale)
+            select(db.fares.c.route, db.fares.c.observed, db.fares.c.depart, db.fares.c.price,
+                   db.fares.c.is_sale, db.fares.c.source)
         )))
-    return df
+    return calibrate_synthetic(df)
+
+
+def calibrate_synthetic(df: pd.DataFrame) -> pd.DataFrame:
+    """Scale each route's synthetic history to the level of its real fares.
+
+    The synthetic data supplies the *shape* (seasonality, holidays, booking curve) and
+    the live data supplies the *level*, so the model's expected prices match the real
+    market instead of the generator's guesses. Routes without live data are unchanged.
+    """
+    if df.empty or "source" not in df:
+        return df
+    df = df.copy()
+    dtd = (pd.to_datetime(df["depart"]) - pd.to_datetime(df["observed"])).dt.days
+    window = dtd.between(1, 200)  # compare like with like: same booking horizon as live data
+    live = df["source"] != "synthetic"
+    for route in df.loc[live, "route"].unique():
+        r = df["route"] == route
+        real = df.loc[r & live & window, "price"]
+        synth = df.loc[r & ~live & window & ~df["is_sale"].astype(bool), "price"]
+        if len(real) >= 10 and len(synth) >= 10:
+            df.loc[r & ~live, "price"] *= real.median() / synth.median()
+    return df.drop(columns="source")
 
 
 def retrain() -> FareForecaster:
