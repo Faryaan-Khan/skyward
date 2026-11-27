@@ -185,6 +185,12 @@ def test_weekly_popular_routes():
         api = c.get("/api/routes").json()
         assert api[0]["code"] == "KUL-CDG" and "searches" in api[0]["reason"]
         assert "KUL-LON" in ingest.tracked_routes()
+        # variety: one destination can't take over the list, and each origin appears at most twice
+        rows = ingest.compute_popular(directions=lambda hub, client=None: ["MOW", "BKK", "TAS"])
+        dests = [r["code"][4:] for r in rows if r["worldwide"]]
+        assert len(dests) == len(set(dests))
+        origins = [r["code"][:3] for r in rows if r["worldwide"]]
+        assert max(origins.count(o) for o in set(origins)) <= 2
 
 
 def test_worldwide_search_any_route(monkeypatch):

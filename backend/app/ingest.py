@@ -150,6 +150,7 @@ def register_search(route: str) -> None:
 # ---- weekly popular routes: what Skyward users search + what the world flies ----
 HUBS = ["KUL", "SIN", "BKK", "HKG", "TYO", "SEL", "DXB", "LON", "PAR", "NYC", "LAX", "SYD", "IST", "DEL", "JKT"]
 POPULAR_SIZE = 12
+POPULAR_JOB = "popular-v2"   # bump to force a recompute after changing the ranking rules
 
 
 def compute_popular(directions=None) -> list[dict]:
@@ -174,7 +175,18 @@ def compute_popular(directions=None) -> list[dict]:
                 worldwide[f"{hub}-{dest}"] = 8 - i
     log.info("popular: %d worldwide routes, %d routes searched on Skyward this week", len(worldwide), len(users))
     scores = {code: 2 * users.get(code, 0) + worldwide.get(code, 0) for code in set(users) | set(worldwide)}
-    top = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))[:POPULAR_SIZE]
+    # Variety: Aviasales demand leans towards a few destinations (e.g. Moscow), so keep at most one route
+    # per destination and two per origin; Skyward users' own searches are never filtered out.
+    top, per_dest, per_origin = [], {}, {}
+    for code, s in sorted(scores.items(), key=lambda kv: (-kv[1], kv[0])):
+        o, d = code.split("-")
+        if code not in users and (per_dest.get(d, 0) >= 1 or per_origin.get(o, 0) >= 2):
+            continue
+        top.append((code, s))
+        per_dest[d] = per_dest.get(d, 0) + 1
+        per_origin[o] = per_origin.get(o, 0) + 1
+        if len(top) == POPULAR_SIZE:
+            break
     rows = [{"code": code, "rank": i + 1, "score": float(s), "user_searches": int(users.get(code, 0)),
              "worldwide": code in worldwide, "updated": now} for i, (code, s) in enumerate(top) if s > 0]
     with db.connect() as c:
@@ -400,15 +412,15 @@ def run_refresh(train: bool = True) -> dict:
         fill_route_meta()
     except Exception as e:
         log.warning("route meta lookup failed: %s", e)
-    if travelpayouts.enabled() and db.try_acquire("popular", 7 * 86400 - 3600):  # weekly
+    if travelpayouts.enabled() and db.try_acquire(POPULAR_JOB, 7 * 86400 - 3600):  # weekly
         try:
             rows = compute_popular()
             if not any(r["worldwide"] for r in rows):
                 log.warning("popular routes: no worldwide data this time, will retry next refresh")
-                db.release("popular")
+                db.release(POPULAR_JOB)
         except Exception as e:
             log.warning("popular routes update failed: %s", e)
-            db.release("popular")
+            db.release(POPULAR_JOB)
     if travelpayouts.enabled():
         saved = fetch_live()
         out["fetched"] = sum(saved.values())
