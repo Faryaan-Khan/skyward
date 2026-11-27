@@ -1,39 +1,20 @@
 name: Refresh prices
-# Pulls live fares, retrains the model and sends due alerts, every 15 minutes.
+# Every 15 minutes: wake the website (Render's free plan sleeps when idle) and ask it to refresh
+# prices. The site does the fetching itself and runs at most one refresh per 15 minutes, so this
+# job needs no secrets: only the repository variable SITE_URL (e.g. https://skyward-xxxx.onrender.com).
 # GitHub may delay scheduled runs by a few minutes at busy times.
 on:
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch: {}
 
-concurrency:
-  group: refresh-prices
-  cancel-in-progress: false
-
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    # only runs once the database secret has been added
-    if: ${{ vars.SKYWARD_LIVE == 'true' }}
+    timeout-minutes: 5
+    if: ${{ vars.SITE_URL != '' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.12", cache: pip }
-      - run: pip install -r requirements.txt
-      - name: Fetch live fares, retrain, send alerts
-        working-directory: backend
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          TRAVELPAYOUTS_TOKEN: ${{ secrets.TRAVELPAYOUTS_TOKEN }}
-          TRAVELPAYOUTS_MARKER: ${{ secrets.TRAVELPAYOUTS_MARKER }}
-          SMTP_HOST: ${{ secrets.SMTP_HOST }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
-          SMTP_USER: ${{ secrets.SMTP_USER }}
-          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          SMTP_FROM: ${{ secrets.SMTP_FROM }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        run: python -m app.ingest
-      - name: Wake the website so visitors don't wait for a cold start
-        if: ${{ vars.SITE_URL != '' }}
-        run: curl -fsS --max-time 60 "${{ vars.SITE_URL }}/api/health" || true
+      - name: Wake the site and trigger a refresh
+        run: |
+          curl -fsS --retry 3 --retry-delay 20 --max-time 90 "${{ vars.SITE_URL }}/api/health"
+          curl -fsS --max-time 60 -X POST "${{ vars.SITE_URL }}/api/refresh"

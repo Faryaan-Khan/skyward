@@ -26,16 +26,20 @@ Skyward notifies you by email or Telegram when it's time.
 ## Architecture (built to scale)
 
 ```
- GitHub Actions (every 15 min)            Render web service (N workers / instances)
- ┌──────────────────────────┐             ┌───────────────────────────────────┐
- │ python -m app.ingest     │             │ FastAPI + dashboard               │
- │  1. fetch Travelpayouts  │──writes──▶  │  stateless, reads Postgres        │
- │  2. retrain model        │   Postgres  │  reloads newest model every 2 min │
- │  3. send due alerts      │   (Neon)    │  60s in-memory cache + gzip       │
- └──────────────────────────┘  ◀──reads── └───────────────────────────────────┘
+ GitHub Actions (every 15 min)        Render web service (N workers / instances)
+ ┌────────────────────────┐           ┌──────────────────────────────────────────┐
+ │ wake site +            │──POST──▶  │ FastAPI + dashboard (stateless)          │
+ │ POST /api/refresh      │           │ background refresh, one at a time via a  │
+ └────────────────────────┘           │ DB lock: fetch fares → retrain → alerts  │
+                                      │ reloads newest model; 60s cache + gzip   │
+                                      └──────────────────┬───────────────────────┘
+                                                         │
+                                                  Postgres (Neon)
 ```
 
-- **Web and data work are separate.** Fetching prices and training never slow down the website.
+- **Refreshes never block visitors.** Fetching and training run in a background thread, and a
+  lock row in the database makes sure only one server runs each 15-minute refresh, however many
+  servers there are. `python -m app.ingest` runs the same refresh from the command line.
 - **Stateless web tier.** All state is in Postgres, so you scale by adding workers or instances
   (`WEB_CONCURRENCY`, Render plan / instance count). No code changes needed.
 - **The model is stored in the database**, so every worker serves the same, latest model.
@@ -69,11 +73,9 @@ You need three free accounts. Do the sign-ups yourself; never paste passwords or
 3. **Render** (website): sign up at render.com with GitHub → **New → Blueprint** → choose this repo.
    It reads `render.yaml`. When asked, paste `DATABASE_URL` (Neon), `TRAVELPAYOUTS_TOKEN` and
    optionally `TRAVELPAYOUTS_MARKER`. Deploy, then copy your site URL (e.g. `https://skyward-xxxx.onrender.com`).
-4. **GitHub** (price refresh every 15 min): in this repo, go to Settings → Secrets and variables → Actions.
-   - **Secrets:** `DATABASE_URL`, `TRAVELPAYOUTS_TOKEN` (plus `TRAVELPAYOUTS_MARKER`, `SMTP_*` and
-     `TELEGRAM_BOT_TOKEN` if you want alerts).
-   - **Variables:** `SKYWARD_LIVE` = `true`, and `SITE_URL` = your Render URL.
-   - Then Actions → **Refresh prices** → **Run workflow** once to load the first live prices.
+4. **GitHub** (keeps it refreshing while nobody is visiting): in this repo, go to Settings → Secrets and
+   variables → Actions → **Variables** and add `SITE_URL` = your Render URL. No secrets needed: the
+   site fetches prices itself, and the workflow only wakes it every 15 minutes.
 
 Within about two minutes the site shows "Live prices · updated just now". Render's free plan sleeps
 when idle; the refresh job pings the site every 15 minutes, which keeps it mostly awake.

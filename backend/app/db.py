@@ -5,14 +5,16 @@ the ingestion job share one database. Local dev and tests fall back to SQLite.
 """
 from __future__ import annotations
 
+import datetime as dt
 import os
 import pickle
 from contextlib import contextmanager
 
 from sqlalchemy import (
     Boolean, Column, Date, DateTime, Float, Index, Integer, LargeBinary, MetaData, String, Table,
-    create_engine, func, insert, select,
+    create_engine, func, insert, or_, select, update,
 )
+from sqlalchemy.exc import IntegrityError
 
 _DEFAULT_SQLITE = os.path.join(os.path.dirname(__file__), "..", "skyward.db")
 
@@ -78,6 +80,12 @@ model_store = Table(
     Column("blob", LargeBinary, nullable=False),
 )
 
+job_lock = Table(
+    "job_lock", metadata,
+    Column("name", String(32), primary_key=True),
+    Column("started", DateTime),  # naive UTC
+)
+
 _engine = None
 
 
@@ -125,6 +133,34 @@ def init(seed_if_empty: bool = True) -> None:
             ]
             for i in range(0, len(batch), 5000):
                 c.execute(insert(fares), batch[i:i + 5000])
+
+
+def try_acquire(name: str, min_interval_s: int) -> bool:
+    """Claim a job slot shared by all workers/instances. True if this caller should run the job.
+
+    Works as a cross-process lock: the UPDATE only succeeds for one caller per interval.
+    """
+    now = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
+    cutoff = now - dt.timedelta(seconds=min_interval_s)
+    with connect() as c:
+        if c.execute(select(job_lock.c.name).where(job_lock.c.name == name)).first() is None:
+            try:
+                with c.begin_nested():
+                    c.execute(insert(job_lock), {"name": name, "started": None})
+            except IntegrityError:
+                pass  # another worker created it first
+        res = c.execute(
+            update(job_lock)
+            .where(job_lock.c.name == name)
+            .where(or_(job_lock.c.started.is_(None), job_lock.c.started < cutoff))
+            .values(started=now)
+        )
+        return res.rowcount == 1
+
+
+def last_job_start(name: str) -> dt.datetime | None:
+    with connect() as c:
+        return c.execute(select(job_lock.c.started).where(job_lock.c.name == name)).scalar()
 
 
 def save_model(model, rows_trained: int) -> None:

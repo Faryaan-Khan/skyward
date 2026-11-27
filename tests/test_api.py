@@ -6,6 +6,7 @@ os.environ["SKYWARD_DB"] = os.path.join(tempfile.mkdtemp(), "test.db")
 os.environ.pop("DATABASE_URL", None)
 os.environ["ADMIN_TOKEN"] = "test-admin"
 os.environ["CACHE_SECONDS"] = "0"
+os.environ["AUTO_REFRESH"] = "0"
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -77,6 +78,13 @@ def test_watches_are_private_and_alerts_fire():
 
         assert c.delete(f"/api/watches/{w['token']}").status_code == 204
         assert c.get(f"/api/watches?tokens={w['token']}").json()["watches"] == []
+
+
+def test_refresh_lock_runs_once_per_interval():
+    with TestClient(app):
+        assert db.try_acquire("unit-test-job", 600) is True
+        assert db.try_acquire("unit-test-job", 600) is False   # second caller is refused
+        assert db.try_acquire("unit-test-job", 0) is True       # interval elapsed -> allowed
 
 
 def test_db_url_normalisation(monkeypatch):

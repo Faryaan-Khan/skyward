@@ -132,26 +132,34 @@ def latest_live_price(conn, route: str, depart: dt.date) -> float | None:
     return float(r[0]) if r else None
 
 
+def run_refresh(train: bool = True) -> dict:
+    """One full refresh: live fares -> retrain -> alerts. Used by the web app and the CLI."""
+    out: dict = {"fetched": None, "trained": False, "alerts": 0}
+    if travelpayouts.enabled():
+        saved = fetch_live()
+        out["fetched"] = sum(saved.values())
+        log.info("live fares saved: %s (total %d)", saved, out["fetched"])
+    else:
+        log.warning("TRAVELPAYOUTS_TOKEN not set: skipping live fetch")
+    if not train:
+        return out
+    model = retrain()
+    with db.connect() as c:
+        n = c.execute(select(func.count()).select_from(db.fares)).scalar()
+    log.info("model retrained on %d rows, MAE %.2f", n, model.mae)
+    out["trained"] = True
+    out["alerts"] = len(check_watches(model))
+    log.info("alerts fired: %d", out["alerts"])
+    return out
+
+
 def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--no-train", action="store_true")
     args = ap.parse_args(argv)
-
     db.init()
-    if travelpayouts.enabled():
-        saved = fetch_live()
-        log.info("live fares saved: %s (total %d)", saved, sum(saved.values()))
-    else:
-        log.warning("TRAVELPAYOUTS_TOKEN not set: skipping live fetch")
-    if args.no_train:
-        return
-    model = retrain()
-    with db.connect() as c:
-        n = c.execute(select(func.count()).select_from(db.fares)).scalar()
-    log.info("model retrained on %d rows, MAE %.2f", n, model.mae)
-    fired = check_watches(model)
-    log.info("alerts fired: %d", len(fired))
+    run_refresh(train=not args.no_train)
 
 
 if __name__ == "__main__":

@@ -35,6 +35,8 @@ STATE: dict = {"model": None, "model_id": None, "model_created": None}
 FRONTEND = os.path.join(os.path.dirname(__file__), "..", "..", "frontend")
 MODEL_POLL_SECONDS = int(os.getenv("MODEL_POLL_SECONDS", "120"))
 CACHE_SECONDS = int(os.getenv("CACHE_SECONDS", "60"))
+REFRESH_MINUTES = int(os.getenv("REFRESH_MINUTES", "15"))
+AUTO_REFRESH = os.getenv("AUTO_REFRESH", "1") != "0"
 _cache: dict[str, tuple[float, object]] = {}
 
 
@@ -71,13 +73,38 @@ async def _model_watcher():
             log.warning("model reload failed: %s", e)
 
 
+def _refresh_job() -> bool:
+    """Run a price refresh if no worker/instance has started one in the last interval."""
+    if not db.try_acquire("refresh", REFRESH_MINUTES * 60 - 60):
+        return False
+    try:
+        ingest.run_refresh()
+        _load_latest_model()
+    except Exception as e:
+        log.warning("refresh failed: %s", e)
+    return True
+
+
+async def _auto_refresh():
+    """Every worker checks each minute; the shared DB lock lets only one run each refresh."""
+    while True:
+        try:
+            await asyncio.to_thread(_refresh_job)
+        except Exception as e:
+            log.warning("auto refresh error: %s", e)
+        await asyncio.sleep(60)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     db.init()
     _load_latest_model()
-    task = asyncio.create_task(_model_watcher())
+    tasks = [asyncio.create_task(_model_watcher())]
+    if AUTO_REFRESH:
+        tasks.append(asyncio.create_task(_auto_refresh()))
     yield
-    task.cancel()
+    for t in tasks:
+        t.cancel()
 
 
 app = FastAPI(title="Skyward", version="0.2.0", lifespan=lifespan)
@@ -299,6 +326,16 @@ def check_watches(x_admin_token: str | None = Header(default=None)):
     """Evaluate every watch and fire alerts. Normally run by the ingestion job; admin only."""
     _require_admin(x_admin_token)
     return ingest.check_watches(model())
+
+
+@app.post("/api/refresh", status_code=202)
+async def refresh():
+    """Wake-up / refresh hook for the scheduler. Safe to call publicly: it runs at most once
+    per refresh interval across all servers, and returns immediately."""
+    last = await asyncio.to_thread(db.last_job_start, "refresh")
+    asyncio.get_running_loop().run_in_executor(None, _refresh_job)
+    return {"accepted": True, "last_started": last.isoformat() if last else None,
+            "interval_minutes": REFRESH_MINUTES}
 
 
 @app.post("/api/admin/reload-model")

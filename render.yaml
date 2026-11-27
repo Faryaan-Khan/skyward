@@ -15,7 +15,7 @@ services:
       - key: PYTHON_VERSION
         value: "3.12.8"
       - key: WEB_CONCURRENCY
-        value: "2"
+        value: "1"   # free plan has 512 MB RAM; raise with a bigger plan
       - key: DATABASE_URL
         sync: false   # paste your Neon connection string in the Render dashboard
       - key: ADMIN_TOKEN
