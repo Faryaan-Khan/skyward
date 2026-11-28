@@ -151,6 +151,12 @@ def test_affiliate_marker_exposed_only_when_valid(monkeypatch):
         for bad in ("12ab", "1&x=2", "<script>", "1" * 13, "\u0661\u0662"):
             monkeypatch.setenv("TRAVELPAYOUTS_MARKER", bad)
             assert travelpayouts.affiliate_marker() is None
+        monkeypatch.setenv("TRAVELPAYOUTS_MARKER", "123456")
+        assert travelpayouts.with_marker("https://www.aviasales.com/search/KUL0112LHR1?t=x") ==             "https://www.aviasales.com/search/KUL0112LHR1?t=x&marker=123456"
+        assert travelpayouts.with_marker("https://www.aviasales.com/search/KUL0112LHR1") ==             "https://www.aviasales.com/search/KUL0112LHR1?marker=123456"
+        assert travelpayouts.with_marker("https://www.aviasales.com/s?t=x&marker=9") == "https://www.aviasales.com/s?t=x&marker=9"
+        assert travelpayouts.with_marker("https://www.google.com/x") == "https://www.google.com/x"
+        assert travelpayouts.with_marker(None) is None
 
 
 def test_telegram_connect_and_webhook_security(monkeypatch):
