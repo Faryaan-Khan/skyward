@@ -40,7 +40,7 @@ window.AIRLINES = {
   KU: ["Kuwait Airways", "kuwaitairways.com"], J9: ["Jazeera Airways", "jazeeraairways.com"], RJ: ["Royal Jordanian", "rj.com"],
   ME: ["Middle East Airlines", "mea.com.lb"], LY: ["El Al", "elal.com"], IA: ["Iraqi Airways", "iraqiairways.com.iq"],
   TK: ["Turkish Airlines", "turkishairlines.com"], PC: ["Pegasus", "flypgs.com"], XQ: ["SunExpress", "sunexpress.com"],
-  AJ: ["AJet", "ajet.com"],
+  VF: ["AJet", "ajet.com"],
   // Africa & Indian Ocean
   MK: ["Air Mauritius", "airmauritius.com"], ET: ["Ethiopian", "ethiopianairlines.com"], KQ: ["Kenya Airways", "kenya-airways.com"],
   MS: ["EgyptAir", "egyptair.com"], AT: ["Royal Air Maroc", "royalairmaroc.com"], SA: ["South African Airways", "flysaa.com"],
@@ -52,7 +52,7 @@ window.AIRLINES = {
   // Europe
   BA: ["British Airways", "britishairways.com"], VS: ["Virgin Atlantic", "virginatlantic.com"], U2: ["easyJet", "easyjet.com"],
   LS: ["Jet2", "jet2.com"], BY: ["TUI Airways", "tui.co.uk"], FR: ["Ryanair", "ryanair.com"], EI: ["Aer Lingus", "aerlingus.com"],
-  W6: ["Wizz Air", "wizzair.com"], AF: ["Air France", "airfrance.com"], TO: ["Transavia France", "transavia.com"],
+  W6: ["Wizz Air", "wizzair.com"], W9: ["Wizz Air UK", "wizzair.com"], W4: ["Wizz Air Malta", "wizzair.com"], AF: ["Air France", "airfrance.com"], TO: ["Transavia France", "transavia.com"],
   KL: ["KLM", "klm.com"], HV: ["Transavia", "transavia.com"], LH: ["Lufthansa", "lufthansa.com"], EW: ["Eurowings", "eurowings.com"],
   DE: ["Condor", "condor.com"], LX: ["SWISS", "swiss.com"], OS: ["Austrian", "austrian.com"], SN: ["Brussels Airlines", "brusselsairlines.com"],
   IB: ["Iberia", "iberia.com"], VY: ["Vueling", "vueling.com"], UX: ["Air Europa", "aireuropa.com"], V7: ["Volotea", "volotea.com"],

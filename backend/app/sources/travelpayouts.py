@@ -117,8 +117,9 @@ def autocomplete(term: str, locale: str = "en", client: httpx.Client | None = No
 
 
 def fetch_month(origin: str, dest: str, month: str, currency: str = "usd",
-                client: httpx.Client | None = None) -> list[dict]:
-    """Cheapest one-way fares per departure date for `month` (YYYY-MM)."""
+                client: httpx.Client | None = None, with_direct: bool = True) -> list[dict]:
+    """One-way fares per departure date for `month` (YYYY-MM): the cheapest overall, plus (second
+    request) the cheapest direct flights, which are usually other airlines, so airlines can be compared."""
     token = os.getenv("TRAVELPAYOUTS_TOKEN")
     if not token:
         return []
@@ -134,16 +135,21 @@ def fetch_month(origin: str, dest: str, month: str, currency: str = "usd",
     }
     own = client is None
     client = client or httpx.Client(timeout=30)
+    rows: list[dict] = []
     try:
-        r = client.get(BASE, params=params, headers={"X-Access-Token": token})
-        r.raise_for_status()
-        body = r.json()
+        for extra in ([{}, {"direct": "true"}] if with_direct else [{}]):
+            r = client.get(BASE, params={**params, **extra}, headers={"X-Access-Token": token})
+            if extra and r.status_code >= 400:
+                continue  # the direct-only request is a bonus; never fail the fetch because of it
+            r.raise_for_status()
+            body = r.json()
+            rows += body.get("data", []) if body.get("success", True) else []
     finally:
         if own:
             client.close()
     marker = affiliate_marker()
     out = []
-    for o in body.get("data", []) if body.get("success", True) else []:
+    for o in rows:
         try:
             depart = dt.date.fromisoformat(o["departure_at"][:10])
             price = float(o["price"])

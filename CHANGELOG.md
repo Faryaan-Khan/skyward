@@ -2,6 +2,22 @@
 
 All notable changes to Skyward. Versions follow [semantic versioning](https://semver.org).
 
+## [2.2.0] - 2026-11-28
+
+### Added
+- **Compare airlines**: every airline found on a route this month, cheapest first, with its exact fare link
+  and the airline's own website; each date's "Compare" menu lists that day's airlines. Direct flights are
+  fetched too, so full-service and low-cost carriers appear side by side (e.g. 11 airlines London → New York).
+- **How it works** page (`/how`) with simple animated steps, where prices come from, the forecast in plain
+  words, privacy, and FAQs. It has its own link in the sidebar.
+- Airline directory of 180+ airlines (Air Mauritius, Malaysia Airlines, Firefly, Fiji Airways, Air Seychelles…).
+
+### Changed
+- Live prices are faster: active routes (featured, watched, searched in the last 2 hours) refresh about every
+  2 minutes; the open page re-checks every minute. Full refresh + model retraining stays every 15 minutes.
+- Deals now have variety: best deal per route, one per destination, at most two per origin.
+- Background auto-refreshes don't count as searches (keeps "Popular this week" honest).
+
 ## [2.1.0] - 2026-11-28
 
 ### Added
