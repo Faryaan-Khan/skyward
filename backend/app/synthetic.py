@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Faryaan Khan
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 """Synthetic fare history generator.
 
 Produces realistic-looking fare observations so the forecasting model and the

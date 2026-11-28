@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Faryaan Khan
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 """Alert delivery: email (any SMTP account, e.g. Gmail app password) and a Telegram bot.
 
 Both are optional and configured with environment variables. When a channel isn't configured

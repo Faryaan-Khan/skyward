@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Faryaan Khan
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 import datetime as dt
 import os
 import tempfile
@@ -137,6 +139,24 @@ def test_alerts_double_opt_in_no_spam_and_unsubscribe(monkeypatch):
         assert c.get(f"/api/watches/unsubscribe?w={w['id']}&s={security.sign('unsub', w['id'])}").status_code == 200
         assert c.get(f"/api/watches?tokens={w['token']}").json()["watches"] == []
         assert c.delete(f"/api/watches/{w2['token']}").status_code == 204
+
+
+def test_affiliate_marker_exposed_only_when_valid(monkeypatch):
+    from app.sources import travelpayouts
+    with TestClient(app) as c:
+        monkeypatch.delenv("TRAVELPAYOUTS_MARKER", raising=False)
+        assert c.get("/api/alerts/config").json()["affiliate_marker"] is None
+        monkeypatch.setenv("TRAVELPAYOUTS_MARKER", " 123456 ")
+        assert c.get("/api/alerts/config").json()["affiliate_marker"] == "123456"
+        for bad in ("12ab", "1&x=2", "<script>", "1" * 13, "\u0661\u0662"):
+            monkeypatch.setenv("TRAVELPAYOUTS_MARKER", bad)
+            assert travelpayouts.affiliate_marker() is None
+        monkeypatch.setenv("TRAVELPAYOUTS_MARKER", "123456")
+        assert travelpayouts.with_marker("https://www.aviasales.com/search/KUL0112LHR1?t=x") ==             "https://www.aviasales.com/search/KUL0112LHR1?t=x&marker=123456"
+        assert travelpayouts.with_marker("https://www.aviasales.com/search/KUL0112LHR1") ==             "https://www.aviasales.com/search/KUL0112LHR1?marker=123456"
+        assert travelpayouts.with_marker("https://www.aviasales.com/s?t=x&marker=9") == "https://www.aviasales.com/s?t=x&marker=9"
+        assert travelpayouts.with_marker("https://www.google.com/x") == "https://www.google.com/x"
+        assert travelpayouts.with_marker(None) is None
 
 
 def test_telegram_connect_and_webhook_security(monkeypatch):

@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Faryaan Khan
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 """Skyward API: worldwide flight search, live fares, ML forecasts, predicted drops and alerts.
 
 Scaling design
@@ -816,8 +818,10 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: st
 
 @app.get("/api/alerts/config")
 def alerts_config():
-    """Which alert channels are switched on (so the page only offers what works)."""
-    return {"email": notify.email_enabled(), "telegram": notify.telegram_enabled()}
+    """Which alert channels are switched on (so the page only offers what works), plus the public
+    Travelpayouts affiliate marker so every Aviasales link on the page can carry it."""
+    return {"email": notify.email_enabled(), "telegram": notify.telegram_enabled(),
+            "affiliate_marker": travelpayouts.affiliate_marker()}
 
 
 @app.get("/api/watches")

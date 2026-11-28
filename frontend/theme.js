@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Faryaan Khan
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 // Apply the saved (or ?theme=) colour mode before the page paints, so there's no flash.
 // Kept as a separate file because the Content-Security-Policy blocks inline scripts.
 (function () {

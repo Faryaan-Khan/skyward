@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Faryaan Khan
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 /* Airline directory: IATA code -> [name, official website]. Used to show airline names and
    "book with the airline" links. Fares themselves come from Aviasales, which covers these carriers. */
 window.AIRLINES = {

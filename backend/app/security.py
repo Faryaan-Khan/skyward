@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Faryaan Khan
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 """Small security helpers: signed one-purpose links and hashed secrets.
 
 * Watch manage tokens are stored as SHA-256 hashes, so a database leak can't be used to

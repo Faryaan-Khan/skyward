@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Faryaan Khan
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 """Travelpayouts / Aviasales Data API adapter (free with a Travelpayouts account).
 
 Returns the cheapest real fares found by Aviasales users in roughly the last 48 hours
@@ -20,6 +22,21 @@ PLACES = "https://autocomplete.travelpayouts.com/places2"
 
 def enabled() -> bool:
     return bool(os.getenv("TRAVELPAYOUTS_TOKEN"))
+
+
+def affiliate_marker() -> str | None:
+    """Travelpayouts partner ID (TRAVELPAYOUTS_MARKER) for affiliate links; digits only, else None."""
+    marker = (os.getenv("TRAVELPAYOUTS_MARKER") or "").strip()
+    return marker if marker.isascii() and marker.isdigit() and len(marker) <= 12 else None
+
+
+def with_marker(link: str | None) -> str | None:
+    """Add the affiliate marker to an Aviasales link that doesn't have one yet (e.g. a fare
+    stored before the marker was configured)."""
+    marker = affiliate_marker()
+    if not link or not marker or "aviasales." not in link or "marker=" in link:
+        return link
+    return link + ("&" if "?" in link else "?") + f"marker={marker}"
 
 
 DIRECTIONS = "https://api.travelpayouts.com/v1/city-directions"
@@ -130,7 +147,7 @@ def fetch_month(origin: str, dest: str, month: str, currency: str = "usd",
     finally:
         if own:
             client.close()
-    marker = os.getenv("TRAVELPAYOUTS_MARKER")
+    marker = affiliate_marker()
     out = []
     for o in rows:
         try:

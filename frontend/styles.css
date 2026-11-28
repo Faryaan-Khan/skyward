@@ -1,3 +1,5 @@
+/* Copyright (c) 2026 Faryaan Khan
+   SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0 */
 /* ===== Skyward v2: dark charcoal + refined gold, with an ivory day mode ===== */
 :root, [data-theme="dark"] {
   --bg: #09090a; --bg-glow: rgba(200,169,106,.10);

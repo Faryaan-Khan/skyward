@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Faryaan Khan
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 """Ingestion job: fetch live fares, retrain the model, send due alerts.
 
 Runs separately from the web app (GitHub Actions cron every 15 minutes), so the
@@ -425,8 +427,9 @@ def check_watches(model: FareForecaster, today: dt.date | None = None, deliver=N
             continue
         if w["email"] and sent_today.get(w["email"], 0) >= MAX_EMAILS_PER_ADDRESS_PER_DAY:
             continue
-        channels = deliver(w, price, adv, kind, fare.get("link"))
-        subject, text, _ = _alert_text(w, price, adv, kind, fare.get("link"))
+        link = travelpayouts.with_marker(fare.get("link"))
+        channels = deliver(w, price, adv, kind, link)
+        subject, text, _ = _alert_text(w, price, adv, kind, link)
         with db.connect() as c:
             c.execute(insert(db.alerts), {"watch_id": w["id"], "kind": kind, "message": text[:1000]})
             c.execute(update(db.watches).where(W.id == w["id"]).values(

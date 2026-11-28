@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Faryaan Khan
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 /* Skyward dashboard: vanilla JS, no build step. */
 "use strict";
 
@@ -95,7 +97,19 @@ applyTheme(document.documentElement.dataset.theme || "dark");
 const AIRLINES = window.AIRLINES || {};   // directory in /static/airlines.js
 const airlineName = (code) => (AIRLINES[code] ? AIRLINES[code][0] : code || "–");
 const dmy = (date) => ({ y: date.slice(0, 4), m: date.slice(5, 7), d: date.slice(8, 10) });
-const aviasalesUrl = (o, d, date, link) => safeUrl(link) || `https://www.aviasales.com/search/${o}${dmy(date).d}${dmy(date).m}${d}1`;
+// Every Aviasales link carries the affiliate marker (partner ID) when the server has one.
+// Links from the fares API usually have it already, so it's only added when missing.
+const withMarker = (url) => {
+  const m = state.alertCfg?.affiliate_marker;
+  if (!url || !m || !/^\d{1,12}$/.test(m)) return url;
+  try {
+    const u = new URL(url);
+    if (!/(^|\.)aviasales\.[a-z.]+$/i.test(u.hostname) || u.searchParams.has("marker")) return url;
+    u.searchParams.set("marker", m);
+    return u.toString();
+  } catch { return url; }
+};
+const aviasalesUrl = (o, d, date, link) => withMarker(safeUrl(link) || `https://www.aviasales.com/search/${o}${dmy(date).d}${dmy(date).m}${d}1`);
 const PROVIDERS = [
   { name: "Aviasales", color: "#1ea7fd", url: aviasalesUrl },
   { name: "Google Flights", color: "#4285f4", url: (o, d, date) => `https://www.google.com/travel/flights?q=${encodeURIComponent(`one way flights from ${o} to ${d} on ${date}`)}&curr=${state.currency}` },
@@ -501,6 +515,7 @@ const myWatches = () => { try { return JSON.parse(localStorage.getItem("skyward_
 const saveWatches = (w) => localStorage.setItem("skyward_watches", JSON.stringify(w));
 async function loadAlertConfig() {
   try { state.alertCfg = await api("/api/alerts/config"); } catch { state.alertCfg = {}; }
+  if (state.alertCfg.affiliate_marker) { renderSearch(); renderDeals(); }   // re-draw links that rendered before the marker arrived
   $("w-email-field").hidden = !state.alertCfg.email;
   $("w-tg-field").hidden = !state.alertCfg.telegram;
   if (!state.alertCfg.email && !state.alertCfg.telegram) {

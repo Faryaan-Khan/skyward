@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Faryaan Khan
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 """Currency exchange rates (USD base) from open.er-api.com: free, no key, ~160 currencies,
 updated daily. Cached in memory for an hour. Rates by ExchangeRate-API (https://www.exchangerate-api.com).
 """
