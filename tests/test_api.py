@@ -141,6 +141,18 @@ def test_alerts_double_opt_in_no_spam_and_unsubscribe(monkeypatch):
         assert c.delete(f"/api/watches/{w2['token']}").status_code == 204
 
 
+def test_affiliate_marker_exposed_only_when_valid(monkeypatch):
+    from app.sources import travelpayouts
+    with TestClient(app) as c:
+        monkeypatch.delenv("TRAVELPAYOUTS_MARKER", raising=False)
+        assert c.get("/api/alerts/config").json()["affiliate_marker"] is None
+        monkeypatch.setenv("TRAVELPAYOUTS_MARKER", " 123456 ")
+        assert c.get("/api/alerts/config").json()["affiliate_marker"] == "123456"
+        for bad in ("12ab", "1&x=2", "<script>", "1" * 13, "\u0661\u0662"):
+            monkeypatch.setenv("TRAVELPAYOUTS_MARKER", bad)
+            assert travelpayouts.affiliate_marker() is None
+
+
 def test_telegram_connect_and_webhook_security(monkeypatch):
     from app import notify, security
     replies = []

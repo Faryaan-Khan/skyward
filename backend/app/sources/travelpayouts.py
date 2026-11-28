@@ -24,6 +24,12 @@ def enabled() -> bool:
     return bool(os.getenv("TRAVELPAYOUTS_TOKEN"))
 
 
+def affiliate_marker() -> str | None:
+    """Travelpayouts partner ID (TRAVELPAYOUTS_MARKER) for affiliate links; digits only, else None."""
+    marker = (os.getenv("TRAVELPAYOUTS_MARKER") or "").strip()
+    return marker if marker.isascii() and marker.isdigit() and len(marker) <= 12 else None
+
+
 DIRECTIONS = "https://api.travelpayouts.com/v1/city-directions"
 AIRPORTS = "https://api.travelpayouts.com/data/en/airports.json"
 CITIES = "https://api.travelpayouts.com/data/en/cities.json"
@@ -126,7 +132,7 @@ def fetch_month(origin: str, dest: str, month: str, currency: str = "usd",
     finally:
         if own:
             client.close()
-    marker = os.getenv("TRAVELPAYOUTS_MARKER")
+    marker = affiliate_marker()
     out = []
     for o in body.get("data", []) if body.get("success", True) else []:
         try:
