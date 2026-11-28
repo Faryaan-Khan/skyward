@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/styles.css?v=2.2.0">
+<link rel="stylesheet" href="/static/styles.css?v=2.2.1">
 </head>
 <body class="how">
 <header class="how-top">
@@ -51,7 +51,7 @@
       <text x="40" y="155" text-anchor="middle" class="lbl">KUL</text><text x="560" y="155" text-anchor="middle" class="lbl">LHR</text>
       <g class="hero-plane"><path d="M14 0 L-8 -7 L-4 0 L-8 7 Z"/></g>
     </svg>
-    <a class="btn gold" href="/">Start searching</a>
+    <div class="hero-actions"><a class="btn gold" href="/">Start searching</a><a class="btn ghost" href="#geek">For the curious: how Skyward thinks ↓</a></div>
   </section>
 
   <!-- steps -->
@@ -160,12 +160,111 @@
     <details><summary>Can I see prices in my currency?</summary><p>Yes. Choose from 160+ currencies at the top of the dashboard; exchange rates update daily.</p></details>
   </section>
 
+  <!-- ===== Under the hood: for the curious ===== -->
+  <section class="geek" id="geek">
+    <div class="geek-head">
+      <p class="eyebrow">Under the hood</p>
+      <h2>For the curious: how Skyward thinks</h2>
+      <p class="muted">A closer look at what happens behind each search, in plain language. Numbers marked
+        <span class="live-badge">live</span> come straight from the running system.</p>
+      <div class="live-stats" id="live-stats" aria-live="polite">
+        <div><small>Average forecast error</small><b data-k="mae">–</b></div>
+        <div><small>As a share of the price</small><b data-k="mape">–</b></div>
+        <div><small>Real fares on file</small><b data-k="fares">–</b></div>
+        <div><small>Routes with live prices</small><b data-k="routes">–</b></div>
+        <div><small>Model last updated</small><b data-k="trained">–</b></div>
+        <div><small>Prices last refreshed</small><b data-k="refreshed">–</b></div>
+      </div>
+    </div>
+
+    <details class="deep" open>
+      <summary><span>01</span> Where every price comes from</summary>
+      <p>Skyward doesn't invent or estimate the prices you see in the fares table. Each one is a <b>real fare</b> that travellers
+        recently found through a large flight-comparison network covering hundreds of airlines and travel agencies.</p>
+      <p>For every route you look at, Skyward asks for both the cheapest flights overall <em>and</em> the cheapest direct flights.
+        That's why low-cost and full-service airlines appear side by side in "Compare airlines".</p>
+      <p>Busy routes are checked every couple of minutes, and everything else a few times an hour. Fares change constantly and seats
+        sell out, so the booking site always has the final say.</p>
+    </details>
+
+    <details class="deep">
+      <summary><span>02</span> How the forecast learns</summary>
+      <p>The forecast is a <b>machine-learning model</b> trained on a large history of fares. It looks at the patterns that really move
+        ticket prices:</p>
+      <ul class="ticks">
+        <li><b>How far ahead you book:</b> fares tend to be high very early, dip, then climb sharply near departure.</li>
+        <li><b>Season:</b> school holidays, year-end and summer are busier and pricier.</li>
+        <li><b>Festivals and holidays:</b> Christmas, New Year, Chinese New Year, Hari Raya, Deepavali and more.</li>
+        <li><b>Day of the week:</b> some departure days are consistently cheaper than others.</li>
+        <li><b>The route itself:</b> short hops and long-haul flights behave differently.</li>
+      </ul>
+      <p>Instead of memorising each route, the model learns how prices move <em>compared with what's normal for that route</em>. That's
+        what lets it make a sensible forecast for a route it has only just started watching, anywhere in the world.</p>
+      <p>The model is <b>retrained automatically many times a day</b> as new prices arrive, so it keeps adapting to the real market.
+        Its average error above is measured on prices it wasn't trained on.</p>
+    </details>
+
+    <details class="deep">
+      <summary><span>03</span> BUY, WAIT and predicted drops</summary>
+      <p>For your exact travel date, Skyward imagines buying the ticket <b>today, tomorrow, next week… all the way to departure</b>,
+        and predicts the price for each of those days.</p>
+      <div class="mini-curve" aria-hidden="true">
+        <svg viewBox="0 0 320 110"><path class="axis" d="M10 95H310"/><path class="c" d="M12 40 C 70 38, 110 80, 160 82 S 250 60, 308 12"/>
+          <circle class="today" cx="12" cy="40" r="5"/><circle class="best" cx="165" cy="82" r="6"/>
+          <text x="12" y="25" class="t">today</text><text x="150" y="104" class="t">best day</text><text x="268" y="30" class="t">departure</text></svg>
+      </div>
+      <ul class="ticks">
+        <li><b>BUY</b>: today is already the best (or close enough that waiting isn't worth the risk).</li>
+        <li><b>WAIT</b>: the model expects a meaningfully lower price later. It shows you roughly how much and when.</li>
+        <li><b>Predicted drops</b>: trips across Skyward where a clear fall is expected, biggest first.</li>
+        <li><b>Deals</b>: the opposite. Real fares available <em>right now</em> that are well below what that route normally costs.</li>
+      </ul>
+      <p class="muted">A forecast is a well-informed estimate, never a guarantee. If a price already works for you, book it.</p>
+    </details>
+
+    <details class="deep">
+      <summary><span>04</span> How "Popular this week" is chosen</summary>
+      <p>Every week Skyward blends two signals: <b>what Skyward travellers searched</b> over the past seven days and <b>what's trending
+        worldwide</b> across major travel hubs. To keep the list interesting, no single destination is allowed to dominate it.
+        Automatic page refreshes don't count as searches, so the list reflects real interest.</p>
+    </details>
+
+    <details class="deep">
+      <summary><span>05</span> Our promise on alerts</summary>
+      <ul class="ticks">
+        <li>Email alerts only start after you confirm your address, so nobody can sign you up.</li>
+        <li>Alerts are based on a <b>real price you can buy</b>, never on a forecast.</li>
+        <li>At most <b>one message per trip per day</b>, and a repeat only if the price falls further.</li>
+        <li>Every message has a one-tap stop link; on Telegram, just send /stop.</li>
+      </ul>
+    </details>
+
+    <details class="deep">
+      <summary><span>06</span> Security &amp; reliability</summary>
+      <ul class="ticks">
+        <li>Encrypted connections everywhere, strict browser security rules and protection against automated abuse.</li>
+        <li>No accounts, no tracking, and no payment details: you always pay on the airline's or agency's own site.</li>
+        <li>Your alerts are tied to a private key that stays in your browser.</li>
+        <li>Every update is automatically tested and security-scanned before it goes live.</li>
+      </ul>
+    </details>
+
+    <details class="deep">
+      <summary><span>07</span> What Skyward can't do (yet)</summary>
+      <ul class="ticks">
+        <li>Show a seat-level live quote from every airline. Prices are recent real fares, so confirm on the booking site.</li>
+        <li>Cover every date on very quiet routes: if few people search a route, there may be gaps.</li>
+        <li>Return trips, multi-city and business class are on the way; today it's one-way economy for one adult.</li>
+      </ul>
+    </details>
+  </section>
+
   <section class="how-cta">
     <h2>Ready when you are.</h2>
     <a class="btn gold" href="/">Search flights</a>
   </section>
 </main>
 <footer><p><a href="/">Skyward</a> · <a href="https://github.com/Faryaan-Khan/skyward" target="_blank" rel="noopener">Source on GitHub</a></p></footer>
-<script src="/static/how.js?v=2.2.0" defer></script>
+<script src="/static/how.js?v=2.2.1" defer></script>
 </body>
 </html>
